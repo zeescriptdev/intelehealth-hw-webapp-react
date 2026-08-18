@@ -23,6 +23,7 @@ const cameraState = {
   addCameraImage: vi.fn(),
   removeCameraImage: vi.fn(),
   clearCameraImages: vi.fn(),
+  commitQuestionImages: vi.fn(),
   jobAidUrl: null as string | null,
   jobAidType: null as 'image' | 'video' | null,
   cameraReturnsNull: false,
@@ -39,6 +40,7 @@ vi.mock(
             addCameraImage: cameraState.addCameraImage,
             removeCameraImage: cameraState.removeCameraImage,
             clearCameraImages: cameraState.clearCameraImages,
+            commitQuestionImages: cameraState.commitQuestionImages,
             jobAidUrlFor: () => cameraState.jobAidUrl,
             jobAidTypeFor: () => cameraState.jobAidType,
           },
@@ -76,10 +78,12 @@ vi.mock(
   })
 );
 
-// Shape produced by transformFhirPhysExamToAyu for the real physExam.json
-// wrapper pattern — the inner choice surfaced as the AyuQuestion with PE
-// section/category extensions, real Yes/No options, and a camera option
-// derived from the attachment child.
+/*
+ * Shape produced by transformFhirPhysExamToAyu for the real physExam.json
+ * wrapper pattern — the inner choice surfaced as the AyuQuestion with PE
+ * section/category extensions, real Yes/No options, and a camera option
+ * derived from the attachment child.
+ */
 const makePeQuestion = (overrides: Partial<AyuQuestion> = {}): AyuQuestion => ({
   linkId: 'inner-jaundice',
   text: 'Is there jaundice?',
@@ -111,6 +115,7 @@ beforeEach(() => {
   cameraState.addCameraImage.mockReset();
   cameraState.removeCameraImage.mockReset();
   cameraState.clearCameraImages.mockReset();
+  cameraState.commitQuestionImages.mockReset();
 });
 
 describe('AyuPhysicalExamOptions', () => {
@@ -229,7 +234,10 @@ describe('AyuPhysicalExamOptions', () => {
         extension: [
           { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
         ],
-        answerOption: [{ valueString: 'plain-string' }],
+        answerOption: [
+          { valueString: 'plain-string' },
+          { valueCoding: { code: 'other', display: 'Other' } },
+        ],
       };
       const setAnswer = vi.fn();
       render(
@@ -345,8 +353,8 @@ describe('AyuPhysicalExamOptions', () => {
     });
 
     it('falls back to optId for the option label and icon when display and valueString are absent', () => {
-      // Covers the `?? optId` and `?? ''` fallbacks in the regular options
-      // map (label resolution + getOptionIcon argument).
+      /* Covers the `?? optId` and `?? ''` fallbacks in the regular options
+         map (label resolution + getOptionIcon argument). */
       const question: AyuQuestion = {
         linkId: 'q',
         text: 'Q',
@@ -354,7 +362,10 @@ describe('AyuPhysicalExamOptions', () => {
         extension: [
           { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
         ],
-        answerOption: [{ valueCoding: { code: 'only-code' } }],
+        answerOption: [
+          { valueCoding: { code: 'only-code' } },
+          { valueCoding: { code: 'other', display: 'Other' } },
+        ],
       };
       render(
         <AyuPhysicalExamOptions
@@ -370,9 +381,11 @@ describe('AyuPhysicalExamOptions', () => {
     });
 
     it('renders the camera tile with the hardcoded "Take a Picture" label regardless of the option display', () => {
-      // The component intentionally ignores the option's display value because
-      // physExam.json sometimes carries marker strings (e.g. "[picture taken]")
-      // in that slot. The tile must always read "Take a Picture".
+      /*
+       * The component intentionally ignores the option's display value because
+       * physExam.json sometimes carries marker strings (e.g. "[picture taken]")
+       * in that slot. The tile must always read "Take a Picture".
+       */
       const question: AyuQuestion = {
         linkId: 'q',
         text: 'Q',
@@ -405,6 +418,101 @@ describe('AyuPhysicalExamOptions', () => {
       expect(
         screen.queryByRole('button', { name: /picture taken/i })
       ).not.toBeInTheDocument();
+    });
+
+    it('auto-selects and hides the tile when there is only one non-camera regular option', () => {
+      const question: AyuQuestion = {
+        linkId: 'bp',
+        text: 'Blood Pressure',
+        type: 'choice',
+        extension: [
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
+        ],
+        answerOption: [
+          {
+            valueCoding: {
+              code: 'lying-down',
+              display: 'Take the patient\'s BP lying down',
+            },
+          },
+        ],
+      };
+      const setAnswer = vi.fn();
+      render(
+        <AyuPhysicalExamOptions
+          question={question}
+          value={undefined}
+          setAnswer={setAnswer}
+        />
+      );
+      // The single option tile should NOT be visible
+      expect(
+        screen.queryByRole('button', { name: /lying down/i })
+      ).not.toBeInTheDocument();
+      // setAnswer should have been called to auto-select
+      expect(setAnswer).toHaveBeenCalledWith(question, 'lying-down');
+    });
+
+    it('auto-selects using valueString fallback when valueCoding.code is absent', () => {
+      const question: AyuQuestion = {
+        linkId: 'bp2',
+        text: 'Blood Pressure',
+        type: 'choice',
+        extension: [
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
+        ],
+        answerOption: [
+          { valueString: 'lying-vs' },
+        ],
+      };
+      const setAnswer = vi.fn();
+      render(
+        <AyuPhysicalExamOptions
+          question={question}
+          value={undefined}
+          setAnswer={setAnswer}
+        />
+      );
+      expect(setAnswer).toHaveBeenCalledWith(question, 'lying-vs');
+    });
+
+    it('shows camera tile when single regular option with camera option present', () => {
+      const question: AyuQuestion = {
+        linkId: 'bp-cam',
+        text: 'Blood Pressure',
+        type: 'choice',
+        extension: [
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
+        ],
+        answerOption: [
+          {
+            valueCoding: { code: 'lying-down', display: 'Lying down' },
+          },
+          {
+            valueCoding: { code: 'cam', display: 'Take a Picture' },
+            extension: [
+              { url: EXT_URL_PE_OPTION_KIND, valueString: PE_OPTION_KIND_CAMERA },
+            ],
+          },
+        ],
+      };
+      const setAnswer = vi.fn();
+      render(
+        <AyuPhysicalExamOptions
+          question={question}
+          value={undefined}
+          setAnswer={setAnswer}
+        />
+      );
+      // Auto-selected single regular option
+      expect(setAnswer).toHaveBeenCalledWith(question, 'lying-down');
+      // Regular option tile hidden but camera tile visible
+      expect(
+        screen.queryByRole('button', { name: /Lying down/i })
+      ).not.toBeInTheDocument();
+      expect(
+        screen.getByRole('button', { name: /Take a Picture/i })
+      ).toBeInTheDocument();
     });
   });
 
@@ -441,8 +549,8 @@ describe('AyuPhysicalExamOptions', () => {
     });
 
     it('pre-selects the camera tile when a committed answer holds the camera code (edit)', () => {
-      // On revisit/edit the saved answer carries the camera code; the tile must
-      // come back pre-selected instead of looking unanswered.
+      /* On revisit/edit the saved answer carries the camera code; the tile must
+         come back pre-selected instead of looking unanswered. */
       render(
         <AyuPhysicalExamOptions
           question={makePeQuestion()}
@@ -489,8 +597,8 @@ describe('AyuPhysicalExamOptions', () => {
     });
 
     it('shows the upload-required error on edit when the picture option is committed but has no images', () => {
-      // committed camera answer but no images (all removed / restore empty) is
-      // an invalid state — the user must add a picture before it can stand.
+      /* committed camera answer but no images (all removed / restore empty) is
+         an invalid state — the user must add a picture before it can stand. */
       cameraState.imagesByQ = {};
       render(
         <AyuPhysicalExamOptions
@@ -677,8 +785,8 @@ describe('AyuPhysicalExamOptions', () => {
       );
       const camTile = screen.getByRole('button', { name: /Take a Picture/ });
       await userEvent.click(camTile);
-      // Tile becomes selected, but the answer hasn't been written yet — that
-      // happens on Submit (with images present).
+      /* Tile becomes selected, but the answer hasn't been written yet — that
+         happens on Submit (with images present). */
       expect(camTile).toHaveClass('selected');
       expect(setAnswer).not.toHaveBeenCalled();
     });
@@ -710,8 +818,8 @@ describe('AyuPhysicalExamOptions', () => {
         ],
         answerOption: [{ valueCoding: { code: 'no', display: 'No' } }],
       };
-      // No tile to click since no camera option — verify the component renders
-      // and doesn't throw.
+      /* No tile to click since no camera option — verify the component renders
+         and doesn't throw. */
       render(
         <AyuPhysicalExamOptions
           question={question}
@@ -789,10 +897,54 @@ describe('AyuPhysicalExamOptions', () => {
       expect(setAnswer).toHaveBeenCalledWith(question, ['cam']);
     });
 
+    it('calls commitQuestionImages on Upload click to move images to pending queue', async () => {
+      cameraState.imagesByQ['inner-jaundice'] = ['img-1'];
+      render(
+        <AyuPhysicalExamOptions
+          question={makePeQuestion()}
+          value={undefined}
+          setAnswer={vi.fn()}
+        />
+      );
+      await userEvent.click(
+        screen.getByRole('button', { name: /Take a Picture/ })
+      );
+      await userEvent.click(
+        screen.getByRole('button', { name: /Upload \(1\)/ })
+      );
+      expect(cameraState.commitQuestionImages).toHaveBeenCalledWith(
+        'inner-jaundice'
+      );
+    });
+
+    it('does not call commitQuestionImages when Upload is clicked with no images', async () => {
+      const images = ['img-1'];
+      cameraState.imagesByQ['inner-jaundice'] = images;
+      render(
+        <AyuPhysicalExamOptions
+          question={makePeQuestion()}
+          value={undefined}
+          setAnswer={vi.fn()}
+        />
+      );
+      await userEvent.click(
+        screen.getByRole('button', { name: /Take a Picture/ })
+      );
+      // Mutate array to empty before click
+      images.length = 0;
+      await userEvent.click(
+        screen.getByRole('button', { name: /Upload \(1\)/ })
+      );
+      // Upload guard kicked in — commitQuestionImages was NOT called
+      expect(cameraState.commitQuestionImages).not.toHaveBeenCalled();
+    });
+
     it('lets a single-choice Yes/No be selected together with the camera tile and commits both on Submit', async () => {
-      // Mobile parity: "Take a Picture" composes with the Yes/No finding instead
-      // of replacing it. Selecting the camera tile first, then Yes, must keep
-      // both highlighted and commit ['yes', 'cam'] on Upload.
+      /*
+       * Mobile parity: "Take a Picture" composes with the Yes/No finding instead
+       * of replacing it. Selecting the camera tile first, then Yes, must keep
+       * both highlighted and commit ['yes', 'cam'] on Upload.
+       */
       cameraState.imagesByQ['inner-jaundice'] = ['img-1'];
       const setAnswer = vi.fn();
       const question = makePeQuestion();
@@ -935,9 +1087,11 @@ describe('AyuPhysicalExamOptions', () => {
     });
 
     it('shows upload-required error when images are emptied between render and click', async () => {
-      // Covers the defensive guard in handleSubmit (lines 125-128): if images
-      // disappear after the Upload button was rendered but before the click
-      // handler runs, the error state is set instead of committing.
+      /*
+       * Covers the defensive guard in handleSubmit (lines 125-128): if images
+       * disappear after the Upload button was rendered but before the click
+       * handler runs, the error state is set instead of committing.
+       */
       const images = ['img-1'];
       cameraState.imagesByQ['inner-jaundice'] = images;
       render(
@@ -972,6 +1126,110 @@ describe('AyuPhysicalExamOptions', () => {
       expect(
         screen.queryByRole('button', { name: /Submit/i })
       ).not.toBeInTheDocument();
+    });
+  });
+
+  describe('mutually-exclusive visual disabling', () => {
+    const makeExclusiveQuestion = (): AyuQuestion => ({
+      linkId: 'pe-multi',
+      text: 'Any abnormal findings?',
+      type: 'choice',
+      required: true,
+      repeats: true,
+      extension: [
+        { url: EXT_URL_PE_SECTION_KEY, valueString: 'General Exams' },
+        { url: EXT_URL_PE_CATEGORY_LABEL, valueString: 'Skin' },
+      ],
+      answerOption: [
+        {
+          valueCoding: { code: 'none', display: 'None' },
+          extension: [
+            { url: EXT_URL_MUTUALLY_EXCLUSIVE, valueString: 'true' },
+          ],
+        },
+        { valueCoding: { code: 'rash', display: 'Rash' } },
+        { valueCoding: { code: 'pallor', display: 'Pallor' } },
+      ],
+    });
+
+    it('applies disabled class to non-exclusive options when exclusive option is selected', () => {
+      render(
+        <AyuPhysicalExamOptions
+          question={makeExclusiveQuestion()}
+          value={['none']}
+          setAnswer={vi.fn()}
+        />
+      );
+      // Exclusive option "None" is selected → normal options get disabled class
+      expect(screen.getByRole('button', { name: /^Rash$/ })).toHaveClass('disabled');
+      expect(screen.getByRole('button', { name: /^Pallor$/ })).toHaveClass('disabled');
+      // Exclusive option itself is NOT disabled
+      expect(screen.getByRole('button', { name: /^None$/ })).not.toHaveClass('disabled');
+    });
+
+    it('applies disabled class to exclusive option when non-exclusive options are selected', () => {
+      render(
+        <AyuPhysicalExamOptions
+          question={makeExclusiveQuestion()}
+          value={['rash', 'pallor']}
+          setAnswer={vi.fn()}
+        />
+      );
+      // Non-exclusive options selected → exclusive option gets disabled class
+      expect(screen.getByRole('button', { name: /^None$/ })).toHaveClass('disabled');
+      // Non-exclusive options are NOT disabled
+      expect(screen.getByRole('button', { name: /^Rash$/ })).not.toHaveClass('disabled');
+      expect(screen.getByRole('button', { name: /^Pallor$/ })).not.toHaveClass('disabled');
+    });
+
+    it('does not apply disabled class when no options are selected', () => {
+      render(
+        <AyuPhysicalExamOptions
+          question={makeExclusiveQuestion()}
+          value={[]}
+          setAnswer={vi.fn()}
+        />
+      );
+      expect(screen.getByRole('button', { name: /^None$/ })).not.toHaveClass('disabled');
+      expect(screen.getByRole('button', { name: /^Rash$/ })).not.toHaveClass('disabled');
+      expect(screen.getByRole('button', { name: /^Pallor$/ })).not.toHaveClass('disabled');
+    });
+
+    it('does not apply disabled class for single-choice (non-repeats) questions', () => {
+      const q: AyuQuestion = {
+        ...makeExclusiveQuestion(),
+        repeats: false,
+      };
+      render(
+        <AyuPhysicalExamOptions
+          question={q}
+          value={'none'}
+          setAnswer={vi.fn()}
+        />
+      );
+      // Single-choice: no mutual exclusivity disabling
+      expect(screen.getByRole('button', { name: /^Rash$/ })).not.toHaveClass('disabled');
+      expect(screen.getByRole('button', { name: /^Pallor$/ })).not.toHaveClass('disabled');
+    });
+
+    it('disabled buttons are still clickable (visual-only) and toggle correctly', async () => {
+      const setAnswer = vi.fn();
+      render(
+        <AyuPhysicalExamOptions
+          question={makeExclusiveQuestion()}
+          value={['rash']}
+          setAnswer={setAnswer}
+        />
+      );
+      // "None" is visually disabled but should still be clickable
+      const noneButton = screen.getByRole('button', { name: /^None$/ });
+      expect(noneButton).toHaveClass('disabled');
+      await userEvent.click(noneButton);
+      // computeMultiSelectToggle should replace 'rash' with 'none'
+      expect(setAnswer).toHaveBeenCalledWith(
+        expect.objectContaining({ linkId: 'pe-multi' }),
+        ['none']
+      );
     });
   });
 

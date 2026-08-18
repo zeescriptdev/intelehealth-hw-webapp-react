@@ -22,9 +22,22 @@ expect.extend({
   // Add custom matchers here if needed
 });
 
+/*
+ * Save original URL methods so they can be restored after each test.
+ * Several test files directly assign vi.fn() to globalThis.URL.createObjectURL
+ * without cleanup, which can leak mocked behaviour into subsequent test files
+ * that run in the same worker thread and cause intermittent failures.
+ */
+const originalCreateObjectURL = globalThis.URL.createObjectURL;
+const originalRevokeObjectURL = globalThis.URL.revokeObjectURL;
+
 // Clean up after each test
 afterEach(() => {
   cleanup();
+
+  // Restore URL methods that test files may have overwritten
+  globalThis.URL.createObjectURL = originalCreateObjectURL;
+  globalThis.URL.revokeObjectURL = originalRevokeObjectURL;
 });
 
 // Store original console methods

@@ -50,6 +50,44 @@ describe('AyuNumberInput', () => {
       expect(input).toHaveAttribute('type', 'number');
     });
 
+    it('should have min attribute defaulting to 0', () => {
+      render(
+        <AyuNumberInput
+          question={mockQuestion}
+          parent={undefined}
+          previousSibling={undefined}
+        />
+      );
+      const input = screen.getByRole('spinbutton');
+      expect(input).toHaveAttribute('min', '0');
+    });
+
+    it('should use minValue from FHIR extension', () => {
+      const questionWithMinMax: AyuQuestion = {
+        ...mockQuestion,
+        extension: [
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/minValue',
+            valueInteger: 1,
+          },
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/maxValue',
+            valueInteger: 50,
+          },
+        ],
+      };
+      render(
+        <AyuNumberInput
+          question={questionWithMinMax}
+          parent={undefined}
+          previousSibling={undefined}
+        />
+      );
+      const input = screen.getByRole('spinbutton');
+      expect(input).toHaveAttribute('min', '1');
+      expect(input).toHaveAttribute('max', '50');
+    });
+
     it('should render disabled input when readOnly is true', () => {
       const readOnlyQuestion: AyuQuestion = {
         ...mockQuestion,
@@ -342,7 +380,7 @@ describe('AyuNumberInput', () => {
       expect(mockOnChange).toHaveBeenCalledWith(3.14);
     });
 
-    it('should call onChange with parsed negative value', () => {
+    it('should clamp negative value to min (default 0)', () => {
       const mockOnChange = vi.fn();
       render(
         <AyuNumberInput
@@ -356,7 +394,7 @@ describe('AyuNumberInput', () => {
       const input = screen.getByRole('spinbutton');
       fireEvent.change(input, { target: { value: '-15' } });
 
-      expect(mockOnChange).toHaveBeenCalledWith(-15);
+      expect(mockOnChange).toHaveBeenCalledWith(0);
     });
 
     it('should return empty string when input value is empty', () => {
@@ -470,7 +508,7 @@ describe('AyuNumberInput', () => {
       expect(mockOnChange).toHaveBeenNthCalledWith(3, 123);
     });
 
-    it('should parse negative decimal correctly', () => {
+    it('should clamp negative decimal to min (default 0)', () => {
       const mockOnChange = vi.fn();
       render(
         <AyuNumberInput
@@ -484,7 +522,7 @@ describe('AyuNumberInput', () => {
       const input = screen.getByRole('spinbutton');
       fireEvent.change(input, { target: { value: '-2.5' } });
 
-      expect(mockOnChange).toHaveBeenCalledWith(-2.5);
+      expect(mockOnChange).toHaveBeenCalledWith(0);
     });
 
     it('should handle value prop correctly', () => {
@@ -546,7 +584,37 @@ describe('AyuNumberInput', () => {
       expect(mockOnChange).toHaveBeenCalledWith(1000);
     });
 
-    it('should handle negative zero', () => {
+    it('should clamp value exceeding max to max when FHIR maxValue is set', () => {
+      const mockOnChange = vi.fn();
+      const questionWithMax: AyuQuestion = {
+        ...mockQuestion,
+        extension: [
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/minValue',
+            valueInteger: 0,
+          },
+          {
+            url: 'http://hl7.org/fhir/StructureDefinition/maxValue',
+            valueInteger: 50,
+          },
+        ],
+      };
+      render(
+        <AyuNumberInput
+          question={questionWithMax}
+          parent={undefined}
+          previousSibling={undefined}
+          onChange={mockOnChange}
+        />
+      );
+
+      const input = screen.getByRole('spinbutton');
+      fireEvent.change(input, { target: { value: '75' } });
+
+      expect(mockOnChange).toHaveBeenCalledWith(50);
+    });
+
+    it('should clamp negative zero to min (default 0)', () => {
       const mockOnChange = vi.fn();
       render(
         <AyuNumberInput
@@ -560,7 +628,7 @@ describe('AyuNumberInput', () => {
       const input = screen.getByRole('spinbutton');
       fireEvent.change(input, { target: { value: '-0' } });
 
-      expect(mockOnChange).toHaveBeenCalledWith(-0);
+      expect(mockOnChange).toHaveBeenCalledWith(0);
     });
 
     it('should display empty string when value is null', () => {

@@ -257,27 +257,29 @@ const PatientProfileComponent: React.FC = () => {
           </ul>
         </CollapsedComponent>
 
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-          <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
-            <img src={iconVisit} alt="" className="w-9 h-9" />
-            <span className="font-semibold text-gray-800 text-base">
-              Open Visit
-            </span>
+        {visits.length === 0 && (
+          <div className="flex flex-col items-center gap-3 py-4">
+            <Button
+              variant="primary"
+              className="w-auto px-8"
+              type="button"
+              onClick={handleStartVisitClick}
+            >
+              Start Visit
+            </Button>
           </div>
-          <div className="px-4 pb-3 pt-2 space-y-2">
-            {visits.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-4">
-                <Button
-                  variant="primary"
-                  className="w-auto px-8"
-                  type="button"
-                  onClick={handleStartVisitClick}
-                >
-                  Start Visit
-                </Button>
-              </div>
-            ) : (
-              visits.map(visit => (
+        )}
+
+        {visits.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+            <div className="flex items-center gap-3 px-4 py-3 border-b border-gray-100">
+              <img src={iconVisit} alt="" className="w-9 h-9" />
+              <span className="font-semibold text-gray-800 text-base">
+                Open Visit
+              </span>
+            </div>
+            <div className="px-4 pb-3 pt-2 space-y-2">
+              {visits.map(visit => (
                 <button
                   key={visit.uuid}
                   className="w-full flex items-center justify-between bg-gray-50 rounded-xl px-3 py-3 hover:bg-gray-100 text-left"
@@ -307,10 +309,10 @@ const PatientProfileComponent: React.FC = () => {
                   </div>
                   <img src={iconRight} alt="" className="w-4 h-4 shrink-0" />
                 </button>
-              ))
-            )}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
       {showResumeModal && (

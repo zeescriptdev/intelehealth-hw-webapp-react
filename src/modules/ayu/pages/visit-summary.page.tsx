@@ -46,7 +46,14 @@ import {
   uploadAllAdditionalDocuments,
   uploadAllPhysicalExamImages,
 } from '../services/obs.service';
-import { bulkMarkSynced } from '../services/temp-storage.service';
+import {
+  bulkMarkSynced,
+  clearCommittedQuestionIds,
+  clearDeletedAssetIds,
+  getChildResources,
+  getCommittedQuestionIds,
+  getDeletedAssetIds,
+} from '../services/temp-storage.service';
 import {
   buildFamilyHistoryData,
   buildMedicalHistoryData,
@@ -65,6 +72,9 @@ import {
   PATIENT_GENDER_KEY,
   PATIENT_NAME_KEY,
   PATIENT_UUID_KEY,
+  PE_DEFAULT_IMAGE_LABEL,
+  RESOURCE_TYPE_ASSET,
+  RESOURCE_TYPE_VISIT,
 } from '../utils/ayu.constants';
 import { flattenAyuPhysExamQuestions } from '../utils/physical-exam.utils';
 
@@ -497,10 +507,12 @@ const VisitSummaryPage = () => {
   const {
     data,
     patientUuid: ctxPatientUuid,
+    visitId: ctxVisitId,
     tempRecordId,
     clearVisitId,
     setLastSectionIndex,
     markVisitUploaded,
+    physExamPendingImages: ctxPendingImages,
   } = useStartVisitData();
   const { hwProfile } = useProfileContext();
   const ayuList = useAyuJsonList(AYU_JSON_KEY_NAME);
@@ -536,7 +548,22 @@ const VisitSummaryPage = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [physExamImagePreviews, setPhysExamImagePreviews] = useState<
     Array<{ preview: string; name: string }>
-  >([]);
+  >(() => {
+    if (ctxPendingImages.length > 0) {
+      return ctxPendingImages.map(img => ({
+        preview: URL.createObjectURL(img.file),
+        name: img.comment ?? PE_DEFAULT_IMAGE_LABEL,
+      }));
+    }
+    const pending = getPendingImages();
+    if (pending.length > 0) {
+      return pending.map(img => ({
+        preview: URL.createObjectURL(img.file),
+        name: img.comment ?? PE_DEFAULT_IMAGE_LABEL,
+      }));
+    }
+    return [];
+  });
 
   useEffect(() => {
     const bgField = data.vitals?.config?.find(f => f.key === 'blood_group');
@@ -582,21 +609,60 @@ const VisitSummaryPage = () => {
   }, [ctxPatientUuid]);
 
   useEffect(() => {
+    if (ctxPendingImages.length > 0) {
+      setPhysExamImagePreviews(
+        ctxPendingImages.map(img => ({
+          preview: URL.createObjectURL(img.file),
+          name: img.comment ?? PE_DEFAULT_IMAGE_LABEL,
+        }))
+      );
+      return;
+    }
+
     const pending = getPendingImages();
-    if (pending.length === 0) return;
+    if (pending.length > 0) {
+      setPhysExamImagePreviews(
+        pending.map(img => ({
+          preview: URL.createObjectURL(img.file),
+          name: img.comment ?? PE_DEFAULT_IMAGE_LABEL,
+        }))
+      );
+      return;
+    }
 
-    const urls: string[] = [];
-    const previews = pending.map(img => {
-      const url = URL.createObjectURL(img.file);
-      urls.push(url);
-      return { preview: url, name: img.comment };
-    });
-    setPhysExamImagePreviews(previews);
-
+    if (!ctxVisitId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await getChildResources<{
+          questionId: string;
+          comment?: string;
+        }>(RESOURCE_TYPE_VISIT, ctxVisitId, RESOURCE_TYPE_ASSET);
+        if (cancelled || !res.data?.length) return;
+        const deletedIds = getDeletedAssetIds();
+        const committedIds = getCommittedQuestionIds();
+        const previews = res.data
+          .filter(
+            r =>
+              r.file_path &&
+              !deletedIds.has(r.id) &&
+              r.data?.questionId &&
+              committedIds.has(r.data.questionId)
+          )
+          .map(r => ({
+            preview: r.file_path!,
+            name: r.data?.comment ?? PE_DEFAULT_IMAGE_LABEL,
+          }));
+        setPhysExamImagePreviews(previews);
+        /* v8 ignore next */
+      } catch {
+        /* v8 ignore next */
+      }
+    })();
     return () => {
-      urls.forEach(url => URL.revokeObjectURL(url));
+      cancelled = true;
     };
-  }, []);
+  }, [ctxVisitId, ctxPendingImages]);
 
   const toggleAll = useCallback(() => setAllOpen(prev => !prev), []);
 
@@ -735,6 +801,8 @@ const VisitSummaryPage = () => {
         bulkMarkSynced([tempRecordId]).catch(() => {});
       }
       clearVisitId();
+      clearCommittedQuestionIds();
+      clearDeletedAssetIds();
       storage.remove(PATIENT_NAME_KEY);
       storage.remove(PATIENT_AGE_KEY);
       storage.remove(PATIENT_GENDER_KEY);

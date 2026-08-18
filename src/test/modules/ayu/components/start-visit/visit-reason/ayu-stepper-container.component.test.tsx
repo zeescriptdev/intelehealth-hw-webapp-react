@@ -33,8 +33,8 @@ vi.mock('../../../../../../modules/ayu/components/start-visit/visit-reason/ayu-r
 }));
 
 vi.mock('../../../../../../modules/ayu/components/start-visit/visit-reason/ayu-nested-renderer.component', () => ({
-  AyuNestedRenderer: vi.fn(({ items, answers, setAnswer }) => (
-    <div data-testid="nested-renderer">
+  AyuNestedRenderer: vi.fn(({ items, answers, setAnswer, selectable }) => (
+    <div data-testid="nested-renderer" data-selectable={String(!!selectable)}>
       {items?.map((item: AyuQuestion) => (
         <div key={item.linkId} data-testid={`nested-item-${item.linkId}`}>
           <input
@@ -69,6 +69,7 @@ vi.mock('../../../../../../modules/ayu/hooks/useFHIRStepper.hook', () => ({
 vi.mock('../../../../../../modules/ayu-library/logic/decision-matrix', () => ({
   resolveAyuComponent: vi.fn(),
   isStrictAssociatedSymptoms: vi.fn(),
+  isPhysicalExamOptionsQuestion: vi.fn(() => false),
   ASSOCIATED_SYMPTOMS_COMPONENT: 'associatedSymptoms',
 }));
 
@@ -76,6 +77,7 @@ vi.mock('../../../../../../modules/ayu/pages/decision-matrix', () => ({
   resolveAyuComponent: vi.fn(),
   isStrictAssociatedSymptoms: vi.fn(),
   ASSOCIATED_SYMPTOMS_COMPONENT: 'associatedSymptoms',
+  PHYSICAL_EXAM_OPTIONS_COMPONENT: 'physicalExamOptions',
 }));
 
 vi.mock('../../../../../../services/toast', () => ({
@@ -377,8 +379,8 @@ describe('AyuStepperContainer', () => {
         isLast: true,
       });
 
-      // Questionnaire without an `item` array exercises the `?.item || []`
-      // fallback, so completeTotal is 0 and progress is left untouched.
+      /* Questionnaire without an `item` array exercises the `?.item || []`
+         fallback, so completeTotal is 0 and progress is left untouched. */
       render(
         <AyuStepperContainer
           questionnaire={{} as any}
@@ -1683,7 +1685,7 @@ describe('AyuStepperContainer', () => {
 
       fireEvent.click(screen.getByTestId('button-submit'));
       expect(mockShowToast).toHaveBeenCalledWith(
-        'Please upload at least one image',
+        'Please upload the captured image',
         undefined,
         'warning'
       );
@@ -3861,8 +3863,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // The container forwards the prop verbatim; the actual firing is covered
-      // in useFHIRStepper's own tests.
+      /* The container forwards the prop verbatim; the actual firing is covered
+         in useFHIRStepper's own tests. */
       expect(_mockUseFHIRStepper).toHaveBeenCalledWith(
         expect.objectContaining({ onSummaryShown })
       );
@@ -3899,8 +3901,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // The mount-only effect must still announce in review mode so the
-      // parent's SideLoader denominator is correct after returning from Back.
+      /* The mount-only effect must still announce in review mode so the
+         parent's SideLoader denominator is correct after returning from Back. */
       expect(mockOnProgressUpdate).toHaveBeenCalledWith(2, 2);
     });
 
@@ -3965,8 +3967,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // showAll + empty questionnaire: mount-effect guard skips, and the
-      // change-driven effect is suppressed by showAll → nothing fires.
+      /* showAll + empty questionnaire: mount-effect guard skips, and the
+         change-driven effect is suppressed by showAll → nothing fires. */
       expect(mockOnProgressUpdate).not.toHaveBeenCalled();
     });
   });
@@ -4758,8 +4760,8 @@ describe('AyuStepperContainer', () => {
     });
 
     it('should format a range answer with both low and high as "<low> - <high>"', () => {
-      // ayu-range-input emits { low, high } — the four branches below cover
-      // every return path in the range branch of formatAnswerValue.
+      /* ayu-range-input emits { low, high } — the four branches below cover
+         every return path in the range branch of formatAnswerValue. */
       const question: AyuQuestion = {
         linkId: 'q1',
         text: 'Cycle length (weeks)',
@@ -4796,8 +4798,8 @@ describe('AyuStepperContainer', () => {
     });
 
     it('should return null primary value when range keys are present but values are null', () => {
-      // Outer guard ('low' in answer || 'high' in answer) passes because the
-      // keys exist; all three numeric returns are skipped → return null path.
+      /* Outer guard ('low' in answer || 'high' in answer) passes because the
+         keys exist; all three numeric returns are skipped → return null path. */
       const question: AyuQuestion = {
         linkId: 'q1',
         text: 'Cycle length (weeks)',
@@ -4955,10 +4957,12 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // Auto-advance to index 3 with topLevelItems only having 2 items.
-      // The backfill loops from prev=0 to currentIndex=3 (i=0,1,2).
-      // topLevelItems[2] is undefined — triggers `if (!q) continue;` at line 367.
-      // The render slice(0, 4) on a 2-item array just renders [q1, q2] safely.
+      /*
+       * Auto-advance to index 3 with topLevelItems only having 2 items.
+       * The backfill loops from prev=0 to currentIndex=3 (i=0,1,2).
+       * topLevelItems[2] is undefined — triggers `if (!q) continue;` at line 367.
+       * The render slice(0, 4) on a 2-item array just renders [q1, q2] safely.
+       */
       mockUseFHIRStepper.mockReturnValue({
         currentQuestion: questions[1],
         currentIndex: 3,
@@ -5036,8 +5040,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // Should not throw, backfill loops over q1 (already submitted — early return)
-      // and q2 (newly submitted)
+      /* Should not throw, backfill loops over q1 (already submitted — early return)
+         and q2 (newly submitted) */
       expect(screen.getByTestId('question-loader-0')).toBeInTheDocument();
     });
   });
@@ -5084,8 +5088,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // getRowLabel returns 'Display Label' from extension (text is empty)
-      // The component renders label and value as separate elements
+      /* getRowLabel returns 'Display Label' from extension (text is empty)
+         The component renders label and value as separate elements */
       expect(screen.getByText('Display Label')).toBeInTheDocument();
       expect(screen.getByText('child-answer')).toBeInTheDocument();
     });
@@ -5132,8 +5136,8 @@ describe('AyuStepperContainer', () => {
         />
       );
 
-      // The child with all non-string array elements should not render a value row
-      // (formatAnswerValue returns null for values.length === 0)
+      /* The child with all non-string array elements should not render a value row
+         (formatAnswerValue returns null for values.length === 0) */
       expect(screen.queryByText('42')).not.toBeInTheDocument();
     });
   });
@@ -5292,6 +5296,133 @@ describe('AyuStepperContainer', () => {
 
       expect(screen.getByText('None')).toBeInTheDocument();
       expect(screen.queryByText(/None\s*:/)).not.toBeInTheDocument();
+    });
+  });
+
+  describe('isSingleOptionPE hides primary value for single-option PE questions', () => {
+    it('should hide primary value when PE question has one regular option and one camera option', () => {
+      const question: AyuQuestion = {
+        linkId: 'bp-pe',
+        text: 'Blood Pressure',
+        type: 'choice',
+        answerOption: [
+          { valueCoding: { code: 'lying', display: 'Lying down' } },
+          {
+            valueCoding: { code: 'cam', display: 'Camera' },
+            extension: [
+              {
+                url: 'urn:intelehealth:physical-exam/option-kind',
+                valueString: 'camera',
+              },
+            ],
+          },
+        ],
+        item: [
+          { linkId: 'systolic', text: 'Systolic', type: 'integer' },
+        ],
+      };
+
+      mockResolveAyuComponent.mockReturnValue('physicalExamOptions');
+      mockResolveAyuComponentLogic.mockReturnValue('physicalExamOptions' as never);
+
+      mockUseFHIRStepper.mockReturnValue({
+        currentQuestion: { linkId: 'q2', text: 'Next', type: 'string' },
+        currentIndex: 1,
+        total: 2,
+        answers: { 'bp-pe': 'lying', systolic: '120' },
+        setAnswer: mockSetAnswer,
+        clearAnswers: mockClearAnswers,
+        goNext: mockGoNext,
+        topLevelItems: [question, { linkId: 'q2', text: 'Next', type: 'string' }],
+        isLast: true,
+      });
+
+      const questionnaire = createMockQuestionnaire([question]);
+      render(
+        <AyuStepperContainer
+          questionnaire={questionnaire}
+          initialAnswers={{ 'bp-pe': 'lying', systolic: '120' }}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      // Primary value ("Lying down") should be hidden for single-option PE
+      expect(screen.queryByText('Lying down')).not.toBeInTheDocument();
+      // Nested value should still appear
+      expect(screen.getByText('120')).toBeInTheDocument();
+    });
+  });
+
+  describe('PE question selectable prop', () => {
+    it('should pass selectable=true to AyuNestedRenderer for physicalExamOptions questions', () => {
+      const question: AyuQuestion = {
+        linkId: 'pe-q1',
+        text: 'Lumps',
+        type: 'choice',
+        item: [{ linkId: 'pe-q1.child', text: 'Where', type: 'choice' }],
+      };
+
+      mockResolveAyuComponent.mockReturnValue('physicalExamOptions');
+      mockResolveAyuComponentLogic.mockReturnValue('physicalExamOptions' as never);
+      mockUseFHIRStepper.mockReturnValue({
+        currentQuestion: question,
+        currentIndex: 0,
+        total: 1,
+        answers: {},
+        setAnswer: mockSetAnswer,
+        clearAnswers: mockClearAnswers,
+        goNext: mockGoNext,
+        topLevelItems: [question],
+        isLast: true,
+      });
+
+      const questionnaire = createMockQuestionnaire([question]);
+      render(
+        <AyuStepperContainer
+          questionnaire={questionnaire}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      const nestedRenderer = screen.getByTestId('nested-renderer');
+      expect(nestedRenderer).toHaveAttribute('data-selectable', 'true');
+    });
+
+    it('should pass selectable=false to AyuNestedRenderer for non-PE questions', () => {
+      const question: AyuQuestion = {
+        linkId: 'q1',
+        text: 'Normal question',
+        type: 'choice',
+        item: [{ linkId: 'q1.child', text: 'Detail', type: 'string' }],
+      };
+
+      mockResolveAyuComponent.mockReturnValue('selectableOptionGroup');
+      mockResolveAyuComponentLogic.mockReturnValue('selectableOptionGroup');
+      mockUseFHIRStepper.mockReturnValue({
+        currentQuestion: question,
+        currentIndex: 0,
+        total: 1,
+        answers: {},
+        setAnswer: mockSetAnswer,
+        clearAnswers: mockClearAnswers,
+        goNext: mockGoNext,
+        topLevelItems: [question],
+        isLast: true,
+      });
+
+      const questionnaire = createMockQuestionnaire([question]);
+      render(
+        <AyuStepperContainer
+          questionnaire={questionnaire}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      const nestedRenderer = screen.getByTestId('nested-renderer');
+      expect(nestedRenderer).toHaveAttribute('data-selectable', 'false');
     });
   });
 });

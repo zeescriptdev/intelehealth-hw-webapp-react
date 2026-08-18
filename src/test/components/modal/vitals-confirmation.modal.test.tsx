@@ -453,6 +453,117 @@ describe('VitalConfirmationModal', () => {
       expect(screen.getByText('Symptom B')).toBeInTheDocument();
     });
 
+    it('renders isChild labelValue items with ml-6 indent (sm size)', () => {
+      const childSectionProps = {
+        ...defaultProps,
+        sections: [
+          {
+            title: 'Parent Section',
+            items: [
+              { type: 'labelValue' as const, label: 'Parent', value: 'PVal' },
+              { type: 'labelValue' as const, label: 'Child', value: 'CVal', isChild: true },
+            ],
+          },
+        ],
+      };
+
+      const { container } = render(<VitalConfirmationModal {...childSectionProps} />);
+
+      expect(screen.getByText('Parent')).toBeInTheDocument();
+      expect(screen.getByText('PVal')).toBeInTheDocument();
+      expect(screen.getByText('Child')).toBeInTheDocument();
+      expect(screen.getByText('CVal')).toBeInTheDocument();
+
+      // Child row should have ml-6 class
+      const sectionItemsContainer = container.querySelector('.mt-2.space-y-2');
+      const gridItems = sectionItemsContainer?.querySelectorAll('[class*="grid"]');
+      expect(gridItems).toHaveLength(2);
+
+      // Parent row should NOT have ml-6
+      expect(gridItems![0]).not.toHaveClass('ml-6');
+      expect(gridItems![0]).toHaveClass('grid-cols-[0px_150px_1fr]');
+
+      // Child row should have ml-6 and different grid columns
+      expect(gridItems![1]).toHaveClass('ml-6');
+      expect(gridItems![1]).toHaveClass('grid-cols-[0px_120px_1fr]');
+    });
+
+    it('renders isChild labelValue items with ml-6 indent (lg size)', () => {
+      const childSectionProps = {
+        ...defaultProps,
+        size: 'lg' as const,
+        sections: [
+          {
+            title: 'Parent Section',
+            items: [
+              { type: 'labelValue' as const, label: 'Parent', value: 'PVal' },
+              { type: 'labelValue' as const, label: 'Child', value: 'CVal', isChild: true },
+            ],
+          },
+        ],
+      };
+
+      const { container } = render(<VitalConfirmationModal {...childSectionProps} />);
+
+      const sectionItemsContainer = container.querySelector('.mt-2.space-y-2');
+      const gridItems = sectionItemsContainer?.querySelectorAll('[class*="grid"]');
+      expect(gridItems).toHaveLength(2);
+
+      // Parent row (lg) should use lg grid columns
+      expect(gridItems![0]).not.toHaveClass('ml-6');
+      expect(gridItems![0]).toHaveClass('grid-cols-[0px_240px_260px]');
+
+      // Child row (lg) should have ml-6 and lg child grid columns
+      expect(gridItems![1]).toHaveClass('ml-6');
+      expect(gridItems![1]).toHaveClass('grid-cols-[0px_200px_1fr]');
+    });
+
+    it('renders isChild=false same as no isChild property', () => {
+      const sectionProps = {
+        ...defaultProps,
+        sections: [
+          {
+            title: 'Section',
+            items: [
+              { type: 'labelValue' as const, label: 'Normal', value: 'V1' },
+              { type: 'labelValue' as const, label: 'Explicit', value: 'V2', isChild: false },
+            ],
+          },
+        ],
+      };
+
+      const { container } = render(<VitalConfirmationModal {...sectionProps} />);
+
+      const sectionItemsContainer = container.querySelector('.mt-2.space-y-2');
+      const gridItems = sectionItemsContainer?.querySelectorAll('[class*="grid"]');
+      expect(gridItems).toHaveLength(2);
+
+      // Both should have the same parent-style columns and no ml-6
+      expect(gridItems![0]).not.toHaveClass('ml-6');
+      expect(gridItems![1]).not.toHaveClass('ml-6');
+      expect(gridItems![0]).toHaveClass('grid-cols-[0px_150px_1fr]');
+      expect(gridItems![1]).toHaveClass('grid-cols-[0px_150px_1fr]');
+    });
+
+    it('renders null value in isChild items as "No information"', () => {
+      const childNullProps = {
+        ...defaultProps,
+        sections: [
+          {
+            title: 'Section',
+            items: [
+              { type: 'labelValue' as const, label: 'Child Null', value: null, isChild: true },
+            ],
+          },
+        ],
+      };
+
+      render(<VitalConfirmationModal {...childNullProps} />);
+
+      expect(screen.getByText('No information')).toBeInTheDocument();
+      expect(screen.getByText('Child Null')).toBeInTheDocument();
+    });
+
     it('returns null for unknown item types in sections', () => {
       const unknownTypeSectionProps = {
         ...defaultProps,

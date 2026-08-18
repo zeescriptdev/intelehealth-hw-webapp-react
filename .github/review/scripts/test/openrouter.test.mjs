@@ -544,3 +544,25 @@ test('JSON mode is only requested when every model in the chain supports it', as
     allStructured.server.close();
   }
 });
+
+test('a non-reasoning model outranks a reasoning one at equal capability', () => {
+  // The regression this locks in: deepseek-v4-pro spent 4000 of 4001 completion
+  // tokens reasoning and replied "No diff was provided for review."
+  const ranked = rankModels([
+    { id: 'thinker:v1', context: 1000000, structured: true, reasoning: true },
+    { id: 'answerer:v1', context: 262144, structured: true, reasoning: false },
+  ]);
+  assert.equal(ranked[0].id, 'answerer:v1');
+});
+
+test('structured output still outranks non-reasoning', () => {
+  const ranked = rankModels([
+    { id: 'plain:v1', context: 262144, structured: false, reasoning: false },
+    { id: 'thinker:v1', context: 262144, structured: true, reasoning: true },
+  ]);
+  assert.equal(
+    ranked[0].id,
+    'thinker:v1',
+    'JSON support is the harder constraint'
+  );
+});

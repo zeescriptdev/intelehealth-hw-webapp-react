@@ -2056,12 +2056,16 @@ describe('transformFhirPhysExamToAyu', () => {
     });
 
     /* Real "Abdomen → Tenderness" shape: the wrapper nests TWO levels deep —
-     * "Tenderness" (1 concept-tag option) → "Yes" (1 concept-tag option) →
-     * "Select the location" (the real question, 3 location options). The
-     * transform must drill all the way to the innermost choice, otherwise the
-     * inner wrapper's lone "Select the location…" concept-tag is shown with no
-     * locations under it. */
-    it('recursively unwraps a double-nested wrapper to the innermost real question', () => {
+     * "Tenderness" (1 concept-tag option) → "No tenderness" (string) + "Yes"
+     * (choice with concept-tag) → "Select the location" (3 location options).
+     *
+     * Because the outer wrapper has TWO real gated children ("No tenderness"
+     * and "Yes"), it is a *branching* question — not a simple wrapper to unwrap
+     * through. The transform collapses it into a single question with
+     * "No tenderness" / "Yes" options, and lifts the "Yes" branch's
+     * sub-question (location) so picking "Yes" reveals the location selector,
+     * matching the mobile app's display. */
+    it('collapses a double-nested Tenderness wrapper into a branching question with lifted location sub-question', () => {
       const root = transformFhirPhysExamToAyu({
         resourceType: 'Questionnaire',
         item: [
@@ -2083,7 +2087,7 @@ describe('transformFhirPhysExamToAyu', () => {
                   },
                 ],
                 item: [
-                  // string sibling — not a choice, must be ignored by unwrap
+                  // string sibling — a terminal branch (No tenderness)
                   {
                     linkId: 'no-tenderness',
                     text: 'No tenderness',
@@ -2145,14 +2149,31 @@ describe('transformFhirPhysExamToAyu', () => {
       });
 
       const q = root?.item?.[0];
-      // drilled to the innermost real question, not the "Yes" wrapper
-      expect(q?.linkId).toBe('tenderness-location');
-      expect(q?.text).toBe('Select the location where there is tenderness');
-      // the real location options are surfaced (not the lone concept-tag)
-      expect(q?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
+      // Collapsed into a branching question with the concept-tag as question text
+      expect(q?.linkId).toBe('wrap-tenderness');
+      expect(q?.text).toBe('Is there abdominal tenderness?');
+      // Options come from branches: No tenderness / Yes (coded by branch linkId)
+      expect(q?.answerOption?.map(o => o.valueCoding)).toEqual([
+        { code: 'no-tenderness', display: 'No tenderness' },
+        { code: 'tenderness-yes', display: 'Yes' },
+      ]);
+      // The "Yes" branch's sub-question (location) is lifted and re-gated
+      // so selecting "Yes" reveals the location picker with its label text
+      expect(q?.item).toHaveLength(1);
+      const locationSub = q?.item?.[0];
+      expect(locationSub?.linkId).toBe('tenderness-location');
+      expect(locationSub?.text).toBe('Select the location where there is tenderness');
+      expect(locationSub?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
         'upper-l',
         'middle-c',
         'all-over',
+      ]);
+      expect(locationSub?.enableWhen).toEqual([
+        {
+          question: 'wrap-tenderness',
+          operator: '=',
+          answerCoding: { code: 'tenderness-yes' },
+        },
       ]);
       // category/question key stay the OUTERMOST wrapper's text ("Tenderness")
       // so the protocol filter "Abdomen:Tenderness" still matches this question
@@ -2163,6 +2184,490 @@ describe('transformFhirPhysExamToAyu', () => {
           { url: EXT_URL_PE_QUESTION_KEY, valueString: 'Tenderness' },
         ])
       );
+    });
+
+    /* Camera attachment nested inside the "Yes" branch of a double-nested
+     * wrapper (e.g. Tenderness with a camera under the inner "Yes" concept-tag).
+     * The recursive findFirstAttachment picks it up and surfaces it alongside
+     * the No/Yes options so the user can select "Yes" AND take a picture. */
+    it('discovers a camera attachment nested inside a double-nested branching wrapper', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            item: [
+              {
+                linkId: 'wrap-tenderness',
+                text: 'Tenderness',
+                type: 'choice',
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'tenderness-cc',
+                      display: 'Is there abdominal tenderness?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'no-tenderness',
+                    text: 'No tenderness',
+                    type: 'string',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                  {
+                    linkId: 'tenderness-yes',
+                    text: 'Yes',
+                    type: 'choice',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                    answerOption: [
+                      {
+                        valueCoding: {
+                          code: 'location-cc',
+                          display: 'Select the location',
+                        },
+                      },
+                    ],
+                    item: [
+                      {
+                        linkId: 'tenderness-location',
+                        text: 'Select the location',
+                        type: 'choice',
+                        enableWhen: [
+                          {
+                            question: 'tenderness-yes',
+                            operator: '=',
+                            answerCoding: { code: 'location-cc' },
+                          },
+                        ],
+                        answerOption: [
+                          { valueCoding: { code: 'upper-l', display: 'Upper(L)' } },
+                        ],
+                      },
+                      // Camera nested inside the "Yes" branch
+                      {
+                        linkId: 'tenderness-camera',
+                        text: 'Take a picture of the area',
+                        type: 'attachment',
+                        enableWhen: [
+                          {
+                            question: 'tenderness-yes',
+                            operator: '=',
+                            answerCoding: { code: 'location-cc' },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('wrap-tenderness');
+      // Options: No tenderness / Yes / camera tile (discovered recursively)
+      const codes = q?.answerOption?.map(o => o.valueCoding?.code);
+      expect(codes).toEqual(['no-tenderness', 'tenderness-yes', 'tenderness-camera']);
+      // Camera option carries the PE_OPTION_KIND_CAMERA marker
+      const cameraOpt = q?.answerOption?.find(
+        o => o.valueCoding?.code === 'tenderness-camera'
+      );
+      expect(cameraOpt?.extension).toEqual([
+        { url: EXT_URL_PE_OPTION_KIND, valueString: PE_OPTION_KIND_CAMERA },
+      ]);
+    });
+
+    it('discovers job-aid extensions on inner branches of a double-nested wrapper', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            answerOption: [
+              { valueCoding: { code: 'tag-1', display: 'Tenderness' } },
+            ],
+            item: [
+              {
+                linkId: 'wrap-tenderness',
+                text: 'Tenderness',
+                type: 'choice',
+                // No job-aid extensions on the outer wrapper
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'tenderness-cc',
+                      display: 'Is there abdominal tenderness?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'no-tenderness',
+                    text: 'No tenderness',
+                    type: 'string',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                  {
+                    linkId: 'tenderness-yes',
+                    text: 'Yes',
+                    type: 'choice',
+                    // Job-aid extensions on the inner branch
+                    extension: [
+                      { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+                      { url: EXT_URL_JOB_AID_FILE, valueString: 'abdominalregions9' },
+                    ],
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                    answerOption: [
+                      {
+                        valueCoding: {
+                          code: 'tenderness-loc',
+                          display: 'Select the location where there is tenderness',
+                        },
+                      },
+                    ],
+                    item: [
+                      {
+                        linkId: 'tenderness-location',
+                        text: 'Select the location where there is tenderness',
+                        type: 'choice',
+                        enableWhen: [
+                          {
+                            question: 'tenderness-yes',
+                            operator: '=',
+                            answerCoding: { code: 'tenderness-cc' },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('wrap-tenderness');
+      // Job-aid extensions should be discovered from the inner branch
+      const jobAidExt = q?.extension?.filter(
+        e => e.url === EXT_URL_JOB_AID_TYPE || e.url === EXT_URL_JOB_AID_FILE
+      );
+      expect(jobAidExt).toEqual([
+        { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+        { url: EXT_URL_JOB_AID_FILE, valueString: 'abdominalregions9' },
+      ]);
+    });
+
+    it('preserves job-aid extensions on the outer wrapper of a branching question', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            answerOption: [
+              { valueCoding: { code: 'tag-1', display: 'Tenderness' } },
+            ],
+            item: [
+              {
+                linkId: 'wrap-tenderness',
+                text: 'Tenderness',
+                type: 'choice',
+                // Job-aid extensions on the outer wrapper (common case)
+                extension: [
+                  { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+                  { url: EXT_URL_JOB_AID_FILE, valueString: 'abdominalregions9' },
+                ],
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'tenderness-cc',
+                      display: 'Is there abdominal tenderness?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'no-tenderness',
+                    text: 'No tenderness',
+                    type: 'string',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                  {
+                    linkId: 'tenderness-yes',
+                    text: 'Yes',
+                    type: 'choice',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                    answerOption: [
+                      {
+                        valueCoding: {
+                          code: 'tenderness-loc',
+                          display: 'Select the location where there is tenderness',
+                        },
+                      },
+                    ],
+                    item: [
+                      {
+                        linkId: 'tenderness-location',
+                        text: 'Select the location where there is tenderness',
+                        type: 'choice',
+                        enableWhen: [
+                          {
+                            question: 'tenderness-yes',
+                            operator: '=',
+                            answerCoding: { code: 'tenderness-cc' },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('wrap-tenderness');
+      // Job-aid extensions from the outer wrapper should be preserved
+      const jobAidExt = q?.extension?.filter(
+        e => e.url === EXT_URL_JOB_AID_TYPE || e.url === EXT_URL_JOB_AID_FILE
+      );
+      expect(jobAidExt).toEqual([
+        { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+        { url: EXT_URL_JOB_AID_FILE, valueString: 'abdominalregions9' },
+      ]);
+    });
+
+    it('propagates job-aid found via subtree search when simple wrapper is unwrapped', () => {
+      /* Simple wrapper (1 gated choice child) where neither the wrapper nor the
+       * inner target has direct job-aid, but a display child of the inner
+       * target carries the extensions. findJobAidInTree(q.item) discovers
+       * them and copies to the effective target (lines 886-890). */
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-eyes',
+            text: 'Eyes',
+            type: 'group',
+            item: [
+              {
+                linkId: 'wrap-jaundice',
+                text: 'Eyes: Jaundice',
+                type: 'choice',
+                // No job-aid on wrapper
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'inner-jaundice',
+                      display: 'Is there jaundice?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'inner-jaundice',
+                    text: 'Is there jaundice?*',
+                    type: 'choice',
+                    // No job-aid on inner target
+                    enableWhen: [
+                      {
+                        question: 'wrap-jaundice',
+                        operator: '=',
+                        answerCoding: { code: 'inner-jaundice' },
+                      },
+                    ],
+                    answerOption: [
+                      { valueCoding: { code: 'no', display: 'No' } },
+                      { valueCoding: { code: 'yes', display: 'Yes' } },
+                    ],
+                    item: [
+                      // Display child carries job-aid (not a sub-question)
+                      {
+                        linkId: 'jaundice-ref',
+                        text: 'Reference image',
+                        type: 'display',
+                        extension: [
+                          { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+                          { url: EXT_URL_JOB_AID_FILE, valueString: 'jaundice-ref-img' },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('inner-jaundice');
+      // Job-aid should be propagated from the subtree display child
+      const jobAidExt = q?.extension?.filter(
+        e => e.url === EXT_URL_JOB_AID_TYPE || e.url === EXT_URL_JOB_AID_FILE
+      );
+      expect(jobAidExt).toEqual([
+        { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+        { url: EXT_URL_JOB_AID_FILE, valueString: 'jaundice-ref-img' },
+      ]);
+    });
+
+    it('reads job-aid from legacy direct properties when FHIR extensions are absent', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            answerOption: [
+              { valueCoding: { code: 'tag-1', display: 'Tenderness' } },
+            ],
+            item: [
+              {
+                linkId: 'wrap-tenderness',
+                text: 'Tenderness',
+                type: 'choice',
+                // Legacy direct properties instead of FHIR extensions
+                'job-aid-type': 'image',
+                'job-aid-file': 'abdominalregions9',
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'tenderness-cc',
+                      display: 'Is there abdominal tenderness?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'no-tenderness',
+                    text: 'No tenderness',
+                    type: 'string',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                  {
+                    linkId: 'tenderness-yes',
+                    text: 'Yes',
+                    type: 'choice',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                ],
+              } as never, // `as never` — the TS type doesn't declare legacy keys
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('wrap-tenderness');
+      const jobAidExt = q?.extension?.filter(
+        e => e.url === EXT_URL_JOB_AID_TYPE || e.url === EXT_URL_JOB_AID_FILE
+      );
+      expect(jobAidExt).toEqual([
+        { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+        { url: EXT_URL_JOB_AID_FILE, valueString: 'abdominalregions9' },
+      ]);
+    });
+
+    it('reads job-aid from legacy properties on non-branching questions', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-hands',
+            text: 'Hands',
+            type: 'group',
+            answerOption: [
+              { valueCoding: { code: 'tag-nail', display: 'Nails' } },
+            ],
+            item: [
+              {
+                linkId: 'q-nails',
+                text: 'Are the nails normal?',
+                type: 'choice',
+                'job-aid-type': 'image',
+                'job-aid-file': 'abnormalnails',
+                answerOption: [
+                  { valueCoding: { code: 'yes', display: 'Yes' } },
+                  { valueCoding: { code: 'no', display: 'No' } },
+                ],
+              } as never,
+            ],
+          },
+        ],
+      });
+
+      const q = root?.item?.[0];
+      expect(q?.linkId).toBe('q-nails');
+      const jobAidExt = q?.extension?.filter(
+        e => e.url === EXT_URL_JOB_AID_TYPE || e.url === EXT_URL_JOB_AID_FILE
+      );
+      expect(jobAidExt).toEqual([
+        { url: EXT_URL_JOB_AID_TYPE, valueString: 'image' },
+        { url: EXT_URL_JOB_AID_FILE, valueString: 'abnormalnails' },
+      ]);
     });
 
     /* Real "Any Location → Skin Rash" shape: a branching sub-form. It is
@@ -2281,10 +2786,18 @@ describe('transformFhirPhysExamToAyu', () => {
           { url: EXT_URL_PE_QUESTION_KEY, valueString: 'Skin Rash' },
         ])
       );
-      // Options come from the branch children: No / Yes (coded by linkId).
+      // Options come from the branch children: No / Yes (coded by linkId),
+      // plus a camera tile from the attachment child.
       expect(q?.answerOption?.map(o => o.valueCoding)).toEqual([
         { code: 'rash-no', display: 'No' },
         { code: 'rash-yes', display: 'Yes' },
+        { code: 'rash-camera', display: 'Picture Taken' },
+      ]);
+      const cameraOpt = q?.answerOption?.find(
+        o => o.valueCoding?.code === 'rash-camera'
+      );
+      expect(cameraOpt?.extension).toEqual([
+        { url: EXT_URL_PE_OPTION_KIND, valueString: PE_OPTION_KIND_CAMERA },
       ]);
       // The "Yes" follow-ups are lifted to the top question and re-gated so
       // they all show when the answer is "Yes" (= the rash-yes branch).
@@ -2301,8 +2814,11 @@ describe('transformFhirPhysExamToAyu', () => {
       }
       const howMany = q?.item?.find(c => c.linkId === 'howmany');
       expect(howMany?.type).toBe('integer');
+      // Non-wrapper branches (2+ answerOptions) preserve sub-question text
+      expect(howMany?.text).toBe('How many rashes? - Enter number');
       const surface = q?.item?.find(c => c.linkId === 'surface');
       expect(surface?.type).toBe('choice');
+      expect(surface?.text).toBe('How is the surface?');
       expect(surface?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
         'smooth',
         'rough',
@@ -2453,6 +2969,10 @@ describe('transformFhirPhysExamToAyu', () => {
     });
 
     it('uses empty string when both answerOption display and q.text are missing in branching question', () => {
+      /* Concept-tag wrapper (1 answerOption) whose valueCoding has no display
+       * AND no q.text → conceptDisplay ?? q.text ?? '' yields ''.
+       * The wrapper unwraps to an inner choice with sub-question children,
+       * triggering buildBranchingPhysExamQuestion. */
       const root = transformFhirPhysExamToAyu({
         resourceType: 'Questionnaire',
         item: [
@@ -2463,20 +2983,29 @@ describe('transformFhirPhysExamToAyu', () => {
             item: [
               {
                 linkId: 'wrap-q',
-                // no text, no answerOption → conceptDisplay ?? q.text ?? '' yields ''
+                // no text
                 type: 'choice',
+                answerOption: [
+                  { valueCoding: { code: 'tag1' } }, // no display
+                ],
                 item: [
                   {
-                    linkId: 'b-no',
-                    text: 'No',
-                    type: 'string',
-                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'cc' } }],
-                  },
-                  {
-                    linkId: 'b-yes',
-                    text: 'Yes',
-                    type: 'string',
-                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'cc' } }],
+                    linkId: 'inner-q',
+                    type: 'choice',
+                    text: 'Inner Question',
+                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'tag1' } }],
+                    answerOption: [
+                      { valueCoding: { code: 'opt-no', display: 'No' } },
+                      { valueCoding: { code: 'opt-yes', display: 'Yes' } },
+                    ],
+                    item: [
+                      {
+                        linkId: 'follow-up',
+                        type: 'string',
+                        text: 'Details',
+                        enableWhen: [{ question: 'inner-q', operator: '=', answerCoding: { code: 'opt-yes' } }],
+                      },
+                    ],
                   },
                 ],
               },
@@ -2489,6 +3018,10 @@ describe('transformFhirPhysExamToAyu', () => {
     });
 
     it('falls back to q.text when answerOption display is missing in branching question', () => {
+      /* Concept-tag wrapper (1 answerOption) whose valueCoding has no display
+       * but q.text is present → conceptDisplay ?? q.text ?? '' yields q.text.
+       * The wrapper unwraps to an inner choice with sub-question children,
+       * triggering buildBranchingPhysExamQuestion. */
       const root = transformFhirPhysExamToAyu({
         resourceType: 'Questionnaire',
         item: [
@@ -2501,19 +3034,27 @@ describe('transformFhirPhysExamToAyu', () => {
                 linkId: 'wrap-q',
                 text: 'Fallback Text',
                 type: 'choice',
-                // no answerOption → conceptDisplay is undefined → falls back to q.text
+                answerOption: [
+                  { valueCoding: { code: 'tag1' } }, // no display
+                ],
                 item: [
                   {
-                    linkId: 'b-no',
-                    text: 'No',
-                    type: 'string',
-                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'cc' } }],
-                  },
-                  {
-                    linkId: 'b-yes',
-                    text: 'Yes',
-                    type: 'string',
-                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'cc' } }],
+                    linkId: 'inner-q',
+                    type: 'choice',
+                    text: 'Inner Question',
+                    enableWhen: [{ question: 'wrap-q', operator: '=', answerCoding: { code: 'tag1' } }],
+                    answerOption: [
+                      { valueCoding: { code: 'opt-no', display: 'No' } },
+                      { valueCoding: { code: 'opt-yes', display: 'Yes' } },
+                    ],
+                    item: [
+                      {
+                        linkId: 'follow-up',
+                        type: 'string',
+                        text: 'Details',
+                        enableWhen: [{ question: 'inner-q', operator: '=', answerCoding: { code: 'opt-yes' } }],
+                      },
+                    ],
                   },
                 ],
               },
@@ -2934,6 +3475,203 @@ describe('transformFhirPhysExamToAyu', () => {
         ],
       });
       expect(root?.item).toEqual([]);
+    });
+
+    /* Flat-sibling pattern: when Tenderness parent and child are section-level
+     * siblings (child gated on parent via enableWhen) rather than nested inside
+     * a wrapper, nestGatedSiblings groups them so only ONE question is produced
+     * with the child attached as a nested item, matching the mobile behaviour. */
+    it('groups flat-sibling gated questions into a single question with nested children', () => {
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            answerOption: [
+              { valueCoding: { code: 'tag-1', display: 'Tenderness' } },
+              // No concept tag for the gated child — it's not independent
+            ],
+            item: [
+              // Parent question at section level
+              {
+                linkId: 'tenderness-parent',
+                text: 'Is there abdominal tenderness?',
+                type: 'choice',
+                answerOption: [
+                  { valueCoding: { code: 'yes', display: 'Yes' } },
+                  { valueCoding: { code: 'no', display: 'No' } },
+                ],
+              },
+              // Child question at section level, gated on the parent
+              {
+                linkId: 'tenderness-location',
+                text: 'Select the location where there is tenderness',
+                type: 'choice',
+                enableWhen: [
+                  {
+                    question: 'tenderness-parent',
+                    operator: '=',
+                    answerCoding: { code: 'yes' },
+                  },
+                ],
+                answerOption: [
+                  { valueCoding: { code: 'upper-l', display: 'Upper(L)' } },
+                  { valueCoding: { code: 'middle-c', display: 'Middle(C)' } },
+                  { valueCoding: { code: 'all-over', display: 'All Over' } },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+
+      // Only ONE top-level question should be produced (not two)
+      expect(root?.item).toHaveLength(1);
+
+      const q = root?.item?.[0];
+      // The parent's own linkId, text, and options are preserved
+      expect(q?.linkId).toBe('tenderness-parent');
+      expect(q?.text).toBe('Is there abdominal tenderness?');
+      expect(q?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
+        'yes',
+        'no',
+      ]);
+
+      // The gated child is attached as a nested item with enableWhen preserved
+      expect(q?.item).toHaveLength(1);
+      const child = q?.item?.[0];
+      expect(child?.linkId).toBe('tenderness-location');
+      expect(child?.text).toBe('Select the location where there is tenderness');
+      expect(child?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
+        'upper-l',
+        'middle-c',
+        'all-over',
+      ]);
+      expect(child?.enableWhen).toEqual([
+        {
+          question: 'tenderness-parent',
+          operator: '=',
+          answerCoding: { code: 'yes' },
+        },
+      ]);
+
+      // Category label uses the concept tag from the parent
+      expect(q?.extension).toEqual(
+        expect.arrayContaining([
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'Abdomen' },
+          { url: EXT_URL_PE_CATEGORY_LABEL, valueString: 'Tenderness' },
+          { url: EXT_URL_PE_QUESTION_KEY, valueString: 'Tenderness' },
+        ])
+      );
+    });
+
+    it('nestGatedSiblings is a no-op when all items are already nested (wrapper pattern)', () => {
+      // nestGatedSiblings only restructures flat section-level siblings; items
+      // already nested inside a wrapper are untouched. The branching detection
+      // in findWrappedInnerChoice handles the nested Tenderness shape directly.
+      const root = transformFhirPhysExamToAyu({
+        resourceType: 'Questionnaire',
+        item: [
+          {
+            linkId: 'sec-abdomen',
+            text: 'Abdomen',
+            type: 'group',
+            item: [
+              {
+                linkId: 'wrap-tenderness',
+                text: 'Tenderness',
+                type: 'choice',
+                answerOption: [
+                  {
+                    valueCoding: {
+                      code: 'tenderness-cc',
+                      display: 'Is there abdominal tenderness?*',
+                    },
+                  },
+                ],
+                item: [
+                  {
+                    linkId: 'no-tenderness',
+                    text: 'No tenderness',
+                    type: 'string',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                  },
+                  {
+                    linkId: 'tenderness-yes',
+                    text: 'Yes',
+                    type: 'choice',
+                    enableWhen: [
+                      {
+                        question: 'wrap-tenderness',
+                        operator: '=',
+                        answerCoding: { code: 'tenderness-cc' },
+                      },
+                    ],
+                    answerOption: [
+                      {
+                        valueCoding: {
+                          code: 'location-cc',
+                          display:
+                            'Select the location where there is tenderness',
+                        },
+                      },
+                    ],
+                    item: [
+                      {
+                        linkId: 'tenderness-location',
+                        text: 'Select the location where there is tenderness',
+                        type: 'choice',
+                        enableWhen: [
+                          {
+                            question: 'tenderness-yes',
+                            operator: '=',
+                            answerCoding: { code: 'location-cc' },
+                          },
+                        ],
+                        answerOption: [
+                          {
+                            valueCoding: {
+                              code: 'upper-l',
+                              display: 'Upper(L)',
+                            },
+                          },
+                          {
+                            valueCoding: {
+                              code: 'middle-c',
+                              display: 'Middle(C)',
+                            },
+                          },
+                          {
+                            valueCoding: {
+                              code: 'all-over',
+                              display: 'All Over',
+                            },
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      });
+      // Produces a branching question (same as the primary Tenderness test)
+      expect(root?.item).toHaveLength(1);
+      expect(root?.item?.[0]?.linkId).toBe('wrap-tenderness');
+      expect(root?.item?.[0]?.answerOption?.map(o => o.valueCoding?.code)).toEqual([
+        'no-tenderness',
+        'tenderness-yes',
+      ]);
     });
 
     it('skips non-attachment children inside the inner question (does not produce a camera option for them)', () => {

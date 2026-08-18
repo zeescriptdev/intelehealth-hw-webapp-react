@@ -11,6 +11,26 @@ export const CONFIRM_MODAL_NO = 'No';
 
 export const PHYSCAL_EXAM_DESCRIPTION = 'Please wash/sanitize your hands';
 export const CONFIRM_MODAL_OK = 'Okay';
+
+/**
+ * Asset key for the abdominal region reference image shown alongside
+ * the Tenderness question.
+ */
+export const JOB_AID_ABDOMINAL_REGIONS = 'abdominalregions9';
+
+/** Asset key for the thyroid swelling reference image (Neck section). */
+export const JOB_AID_THYROID_SWELLING = 'thyroidswelling';
+
+/**
+ * Fallback mapping from PE question key to job-aid asset filename.
+ * Used when the FHIR questionnaire does not include a jobAidFile extension.
+ * Keys must be **lowercase** — the lookup lowercases the PE_QUESTION_KEY.
+ */
+export const JOB_AID_FALLBACK: Record<string, string> = {
+  tenderness: JOB_AID_ABDOMINAL_REGIONS,
+  'thyroid swelling': JOB_AID_THYROID_SWELLING,
+};
+
 // --- Selected Reasons ---
 export const SELECTED_REASONS_LABEL = 'Selected reasons';
 export const REMOVE_REASON_CONFIRM_TITLE = 'Remove visit reason?';
@@ -28,6 +48,9 @@ export const SEARCH_PLACEHOLDER = 'Type or select reason eg. Fever';
 export const NO_MATCHING_COMPLAINTS = 'No matching complaints found';
 export const MAX_FILTERED_RESULTS = 8;
 
+// --- Breadcrumb Status ---
+export const BREADCRUMB_STATUS_PENDING = 'pending' as const;
+
 // --- Footer ---
 export const BUTTON_BACK = 'Back';
 export const BUTTON_CONFIRM = 'Confirm';
@@ -43,6 +66,8 @@ export const VALIDATION_ALL_COMPULSORY =
 export const VALIDATION_ENTER_VALUE = 'Please enter a value';
 export const VALIDATION_SELECT_OPTION = 'Please select any one option';
 export const VALIDATION_UPLOAD_IMAGE = 'Please upload at least one image';
+export const VALIDATION_UPLOAD_CAPTURED_IMAGE =
+  'Please upload the captured image';
 
 export const validationMessageForReason = (
   reason: QuestionValidationReason | undefined,
@@ -51,7 +76,8 @@ export const validationMessageForReason = (
   let message: string;
   switch (reason) {
     case 'uploadImage':
-      message = VALIDATION_UPLOAD_IMAGE;
+    case 'uploadCapturedImage':
+      message = VALIDATION_UPLOAD_CAPTURED_IMAGE;
       break;
     case 'allCompulsory':
       message = VALIDATION_ALL_COMPULSORY;
@@ -62,14 +88,33 @@ export const validationMessageForReason = (
     default:
       message = VALIDATION_SELECT_OPTION;
   }
-  return questionNumber
-    ? `Please answer Question ${questionNumber} before proceeding`
-    : message;
+  if (questionNumber) {
+    if (reason === 'uploadCapturedImage' || reason === 'uploadImage') {
+      return `Question ${questionNumber}: ${message}`;
+    }
+    return `Please answer Question ${questionNumber} before proceeding`;
+  }
+  return message;
 };
 
 // --- Physical Exam Camera ---
 export const PE_CAMERA_TILE_LABEL = 'Take a Picture';
 export const PE_PICTURE_TAKEN_LABEL = 'Picture Taken';
+export const PE_DEFAULT_IMAGE_LABEL = 'Physical Exam';
+export const PE_DEFAULT_SECTION_LABEL = 'General Exams';
+export const PE_LOADING_TEXT = 'Loading physical exam...';
+export const PE_CONFIG_NAME = 'physExam';
+
+// --- Temp Storage Keys ---
+export const RESOURCE_TYPE_VISIT = 'visit';
+export const RESOURCE_TYPE_ASSET = 'asset';
+export const BLOB_URL_PREFIX = 'blob:';
+export const DEFAULT_CREATED_BY = 'unknown';
+
+// --- Summary Modal ---
+export const SUMMARY_ITEM_TYPE_LABEL_VALUE = 'labelValue';
+export const FHIR_RESOURCE_TYPE_QUESTIONNAIRE = 'Questionnaire';
+export const STEPPER_SKIPPED_LABEL = 'Skipped';
 
 // FHIR Stepper Constants
 export const DEFAULT_VISIT_REASON_TEXT = 'Visit reason';
@@ -159,6 +204,9 @@ export const FREQUENCY_FACE_EYE_VARIANTS: readonly FrequencyEyeStyle[] = [
   'normal',
   'cross',
 ];
+
+// Number Input
+export const NUMBER_INPUT_DEFAULT_MIN = 0;
 
 // Range Input
 export const RANGE_DEFAULT_MIN = 0;

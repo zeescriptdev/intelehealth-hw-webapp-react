@@ -83,6 +83,18 @@ export const GENDER_CODE_MALE = '1';
 export const GENDER_CODE_OTHER = 'other';
 
 // ========================
+// FHIR Question Types
+// ========================
+export const FHIR_TYPE_CHOICE = 'choice';
+export const FHIR_TYPE_STRING = 'string';
+export const FHIR_TYPE_INTEGER = 'integer';
+export const FHIR_TYPE_DATE = 'date';
+export const FHIR_TYPE_QUANTITY = 'quantity';
+export const FHIR_TYPE_ATTACHMENT = 'attachment';
+export const FHIR_TYPE_DISPLAY = 'display';
+export const FHIR_TYPE_GROUP = 'group';
+
+// ========================
 // Associated Symptoms
 // ========================
 export const ASSOCIATED_SYMPTOMS_TEXT = 'Associated symptoms';

@@ -281,13 +281,31 @@ describe('PatientProfileComponent', () => {
 
  
 
-  it('renders Start Visit button when visits array is empty', () => {
+  it('renders Start Visit button at the bottom and hides Open Visit section when visits array is empty', () => {
     h.mockUsePatientProfile.mockReturnValue({
       ...defaultHookReturn,
       visits: [],
     });
     render(<PatientProfileComponent />);
     expect(screen.getByText('Start Visit')).toBeInTheDocument();
+    expect(screen.queryByText('Open Visit')).not.toBeInTheDocument();
+  });
+
+  it('renders Open Visit section when visits exist', () => {
+    h.mockUsePatientProfile.mockReturnValue({
+      ...defaultHookReturn,
+      visits: [
+        {
+          uuid: 'vis-uuid-abcd1234',
+          startDatetime: '2025-09-12T20:14:36.000+0000',
+          visitType: { display: 'OPD Visit' },
+          encounters: [],
+        },
+      ],
+    });
+    render(<PatientProfileComponent />);
+    expect(screen.getByText('Open Visit')).toBeInTheDocument();
+    expect(screen.queryByText('Start Visit')).not.toBeInTheDocument();
   });
 
  

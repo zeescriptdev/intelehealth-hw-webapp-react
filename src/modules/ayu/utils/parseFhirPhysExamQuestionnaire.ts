@@ -163,15 +163,24 @@ export function parseFhirPhysExamQuestionnaire(
       const isRequired = q.required === true;
       const isMultiChoice = isCheckBox(q);
 
-      const jobAidTypeRaw = findExt(
-        q.extension,
-        IH_EXT_JOB_AID_TYPE
-      )?.valueString;
+      // Check FHIR extensions first, then fall back to legacy direct
+      // properties (`job-aid-type`, `job-aid-file`) that some server builds
+      // still emit as top-level JSON keys instead of FHIR extensions.
+      const raw = q as unknown as Record<string, unknown>;
+      const jobAidTypeRaw =
+        findExt(q.extension, IH_EXT_JOB_AID_TYPE)?.valueString ??
+        (typeof raw['job-aid-type'] === 'string'
+          ? raw['job-aid-type']
+          : undefined);
       const jobAidType =
         jobAidTypeRaw === 'image' || jobAidTypeRaw === 'video'
           ? jobAidTypeRaw
           : undefined;
-      const jobAidFile = findExt(q.extension, IH_EXT_JOB_AID_FILE)?.valueString;
+      const jobAidFile =
+        findExt(q.extension, IH_EXT_JOB_AID_FILE)?.valueString ??
+        (typeof raw['job-aid-file'] === 'string'
+          ? raw['job-aid-file']
+          : undefined);
 
       const options: PhysicalExamOption[] = [];
       for (const ao of q.answerOption ?? []) {

@@ -14,6 +14,7 @@ import {
   getPendingImages,
   getObsByPatientAndConcept,
   removePendingImage,
+  removePendingImagesByQuestionId,
   uploadAllPhysicalExamImages,
   addPendingDocument,
   clearPendingDocuments,
@@ -72,6 +73,54 @@ describe('obs.service', () => {
 
       expect(getPendingImages()).toHaveLength(1);
       expect(getPendingImages()[0].comment).toBe('Head');
+    });
+
+    it('should store questionId when provided', () => {
+      const file = new File(['test'], 'photo.png', { type: 'image/png' });
+      addPendingImage(file, 'General exams', 'q1');
+
+      expect(getPendingImages()[0].questionId).toBe('q1');
+    });
+
+    it('should leave questionId undefined when not provided', () => {
+      const file = new File(['test'], 'photo.png', { type: 'image/png' });
+      addPendingImage(file, 'General exams');
+
+      expect(getPendingImages()[0].questionId).toBeUndefined();
+    });
+
+    it('should remove images by questionId', () => {
+      const file1 = new File(['test1'], 'photo1.png', { type: 'image/png' });
+      const file2 = new File(['test2'], 'photo2.png', { type: 'image/png' });
+      const file3 = new File(['test3'], 'photo3.png', { type: 'image/png' });
+
+      addPendingImage(file1, 'General exams', 'q1');
+      addPendingImage(file2, 'Head', 'q2');
+      addPendingImage(file3, 'Eyes', 'q1');
+
+      removePendingImagesByQuestionId('q1');
+
+      expect(getPendingImages()).toHaveLength(1);
+      expect(getPendingImages()[0].comment).toBe('Head');
+      expect(getPendingImages()[0].questionId).toBe('q2');
+    });
+
+    it('should not remove images without a matching questionId', () => {
+      const file1 = new File(['test1'], 'photo1.png', { type: 'image/png' });
+      const file2 = new File(['test2'], 'photo2.png', { type: 'image/png' });
+
+      addPendingImage(file1, 'General exams');
+      addPendingImage(file2, 'Head', 'q2');
+
+      removePendingImagesByQuestionId('q1');
+
+      // Neither removed: file1 has no questionId, file2 has 'q2'
+      expect(getPendingImages()).toHaveLength(2);
+    });
+
+    it('should handle removePendingImagesByQuestionId on empty queue', () => {
+      removePendingImagesByQuestionId('q1');
+      expect(getPendingImages()).toHaveLength(0);
     });
 
     it('should clear all pending images', () => {

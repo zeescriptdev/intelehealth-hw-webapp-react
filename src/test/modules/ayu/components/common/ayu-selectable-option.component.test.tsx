@@ -205,4 +205,60 @@ describe('AyuSelectableOption', () => {
       expect(button.getAttribute('type')).toBe('button');
     });
   });
+
+  describe('Disabled Prop', () => {
+    it('should apply disabled CSS class when disabled is true', () => {
+      render(
+        <AyuSelectableOption label="Option" value="opt" selected={false} disabled={true} />
+      );
+      expect(screen.getByRole('button')).toHaveClass('disabled');
+    });
+
+    it('should not apply disabled CSS class when disabled is false', () => {
+      render(
+        <AyuSelectableOption label="Option" value="opt" selected={false} disabled={false} />
+      );
+      expect(screen.getByRole('button')).not.toHaveClass('disabled');
+    });
+
+    it('should not apply disabled CSS class when disabled is undefined', () => {
+      render(
+        <AyuSelectableOption label="Option" value="opt" selected={false} />
+      );
+      expect(screen.getByRole('button')).not.toHaveClass('disabled');
+    });
+
+    it('should NOT set the HTML disabled attribute (visual-only disabled)', () => {
+      render(
+        <AyuSelectableOption label="Option" value="opt" selected={false} disabled={true} />
+      );
+      const button = screen.getByRole('button');
+      expect(button).not.toBeDisabled();
+    });
+
+    it('should still fire onClick when disabled is true (visual-only)', async () => {
+      const handleClick = vi.fn();
+      const user = userEvent.setup();
+      render(
+        <AyuSelectableOption
+          label="Option"
+          value="opt"
+          selected={false}
+          disabled={true}
+          onClick={handleClick}
+        />
+      );
+      await user.click(screen.getByRole('button'));
+      expect(handleClick).toHaveBeenCalledTimes(1);
+    });
+
+    it('should apply both disabled and selected classes together', () => {
+      render(
+        <AyuSelectableOption label="Option" value="opt" selected={true} disabled={true} />
+      );
+      const button = screen.getByRole('button');
+      expect(button).toHaveClass('disabled');
+      expect(button).toHaveClass('selected');
+    });
+  });
 });

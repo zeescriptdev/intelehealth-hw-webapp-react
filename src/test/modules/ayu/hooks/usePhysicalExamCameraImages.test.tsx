@@ -4,26 +4,30 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePhysicalExamCameraImages } from '../../../../modules/ayu/hooks/usePhysicalExamCameraImages';
 
 const addPendingImage = vi.fn();
-const clearPendingImages = vi.fn();
-const removePendingImage = vi.fn();
+const removePendingImagesByQuestionId = vi.fn();
 const getChildResources = vi.fn();
 const upsertAssetResource = vi.fn();
-const fileToBase64 = vi.fn();
+const deleteAssetResource = vi.fn().mockResolvedValue(undefined);
+const markQuestionCommitted = vi.fn();
+const unmarkQuestionCommitted = vi.fn();
+const getDeletedAssetIds = vi.fn().mockReturnValue(new Set<number>());
 const getUser = vi.fn();
 
 vi.mock('../../../../modules/ayu/services/obs.service', () => ({
   addPendingImage: (...args: unknown[]) => addPendingImage(...args),
-  clearPendingImages: (...args: unknown[]) => clearPendingImages(...args),
-  removePendingImage: (...args: unknown[]) => removePendingImage(...args),
+  removePendingImagesByQuestionId: (...args: unknown[]) =>
+    removePendingImagesByQuestionId(...args),
 }));
 
 vi.mock('../../../../modules/ayu/services/temp-storage.service', () => ({
   getChildResources: (...args: unknown[]) => getChildResources(...args),
   upsertAssetResource: (...args: unknown[]) => upsertAssetResource(...args),
-}));
-
-vi.mock('../../../../modules/profile/profile.helpers', () => ({
-  fileToBase64: (...args: unknown[]) => fileToBase64(...args),
+  deleteAssetResource: (...args: unknown[]) => deleteAssetResource(...args),
+  markQuestionCommitted: (...args: unknown[]) =>
+    markQuestionCommitted(...args),
+  unmarkQuestionCommitted: (...args: unknown[]) =>
+    unmarkQuestionCommitted(...args),
+  getDeletedAssetIds: (...args: unknown[]) => getDeletedAssetIds(...args),
 }));
 
 vi.mock('../../../../utils/storage', () => ({
@@ -32,15 +36,22 @@ vi.mock('../../../../utils/storage', () => ({
 
 const sectionCommentFor = vi.fn((qId: string) => `Section for ${qId}`);
 
+let blobCounter = 0;
+
 beforeEach(() => {
   addPendingImage.mockReset();
-  clearPendingImages.mockReset();
-  removePendingImage.mockReset();
+  removePendingImagesByQuestionId.mockReset();
   getChildResources.mockReset();
   upsertAssetResource.mockReset();
-  fileToBase64.mockReset().mockResolvedValue('data:image/png;base64,xxx');
+  deleteAssetResource.mockReset().mockResolvedValue(undefined);
+  markQuestionCommitted.mockReset();
+  unmarkQuestionCommitted.mockReset();
+  getDeletedAssetIds.mockReset().mockReturnValue(new Set<number>());
   getUser.mockReset();
   sectionCommentFor.mockClear();
+  blobCounter = 0;
+  globalThis.URL.createObjectURL = vi.fn(() => `blob:mock-${++blobCounter}`);
+  globalThis.URL.revokeObjectURL = vi.fn();
 });
 
 describe('usePhysicalExamCameraImages', () => {
@@ -109,19 +120,44 @@ describe('usePhysicalExamCameraImages', () => {
       expect(result.current.cameraImagesFor('q1')).toEqual([]);
     });
 
-    it('swallows errors from temp-storage', async () => {
+    it('filters out assets that are in the deleted-asset set', async () => {
+      getDeletedAssetIds.mockReturnValue(new Set([11]));
+      getChildResources.mockResolvedValue({
+        data: [
+          { id: 11, file_path: 'http://cdn/a.png', data: { questionId: 'q1' } },
+          { id: 12, file_path: 'http://cdn/b.png', data: { questionId: 'q1' } },
+        ],
+      });
+      const { result } = renderHook(() =>
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
+      );
+      await waitFor(() =>
+        expect(result.current.cameraImagesFor('q1')).toEqual([
+          'http://cdn/b.png',
+        ])
+      );
+    });
+
+    it('logs error and re-throws when temp-storage fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getChildResources.mockRejectedValue(new Error('boom'));
       const { result } = renderHook(() =>
         usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
       );
       await waitFor(() => expect(getChildResources).toHaveBeenCalled());
       expect(result.current.cameraImagesFor('q1')).toEqual([]);
+      await waitFor(() =>
+        expect(errorSpy).toHaveBeenCalledWith(
+          'Failed to restore camera images from temp storage',
+          expect.any(Error)
+        )
+      );
+      errorSpy.mockRestore();
     });
   });
 
   describe('addCameraImage', () => {
-    it('persists locally only when visitId is missing (no upload)', async () => {
-      getChildResources.mockResolvedValue({ data: [] });
+    it('stores locally and does not upload when visitId is missing', async () => {
       const { result } = renderHook(() =>
         usePhysicalExamCameraImages({ visitId: null, sectionCommentFor })
       );
@@ -129,13 +165,12 @@ describe('usePhysicalExamCameraImages', () => {
       await act(async () => {
         await result.current.addCameraImage('q1', file);
       });
-      expect(addPendingImage).toHaveBeenCalledWith(
-        file,
-        'Section for q1'
-      );
+      // addCameraImage no longer calls addPendingImage — that happens on commitQuestionImages
+      expect(addPendingImage).not.toHaveBeenCalled();
       expect(upsertAssetResource).not.toHaveBeenCalled();
+      // Preview is from URL.createObjectURL
       expect(result.current.cameraImagesFor('q1')).toEqual([
-        'data:image/png;base64,xxx',
+        'blob:mock-1',
       ]);
     });
 
@@ -157,16 +192,16 @@ describe('usePhysicalExamCameraImages', () => {
         parent_type: 'visit',
         parent_id: 'visit-1',
         created_by: 'user-uuid',
-        data: { questionId: 'q1' },
+        data: { questionId: 'q1', comment: 'Section for q1' },
       });
+      // Preview is from URL.createObjectURL
       expect(result.current.cameraImagesFor('q1')).toEqual([
-        'data:image/png;base64,xxx',
+        'blob:mock-1',
       ]);
     });
 
-    it('uses the raw storage user string when getUser returns invalid JSON', async () => {
+    it('uses "unknown" when getUser returns invalid JSON', async () => {
       getChildResources.mockResolvedValue({ data: [] });
-      // Non-JSON value — JSON.parse throws, the catch falls through
       getUser.mockReturnValue('not-json');
       upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
 
@@ -176,7 +211,6 @@ describe('usePhysicalExamCameraImages', () => {
       await act(async () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
       });
-      // createdBy stays at 'unknown' since the parse threw
       expect(upsertAssetResource.mock.calls[0][1].created_by).toBe('unknown');
     });
 
@@ -192,7 +226,6 @@ describe('usePhysicalExamCameraImages', () => {
       await act(async () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
       });
-      // No uuid field → ?? falls back to the raw string
       expect(upsertAssetResource.mock.calls[0][1].created_by).toBe(raw);
     });
 
@@ -210,7 +243,8 @@ describe('usePhysicalExamCameraImages', () => {
       expect(upsertAssetResource.mock.calls[0][1].created_by).toBe('unknown');
     });
 
-    it('still adds the image to local state when the upload fails', async () => {
+    it('logs error when the upload fails', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       getChildResources.mockResolvedValue({ data: [] });
       getUser.mockReturnValue(null);
       upsertAssetResource.mockRejectedValue(new Error('upload failed'));
@@ -222,13 +256,18 @@ describe('usePhysicalExamCameraImages', () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
       });
       expect(result.current.cameraImagesFor('q1')).toEqual([
-        'data:image/png;base64,xxx',
+        'blob:mock-1',
       ]);
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Failed to upload camera image to temp storage',
+        expect.any(Error)
+      );
+      errorSpy.mockRestore();
     });
   });
 
   describe('removeCameraImage', () => {
-    it('removes the image and de-queues it from the pending queue (using flat index)', async () => {
+    it('removes the image at the given index and clears pending images for the question', async () => {
       getChildResources.mockResolvedValue({ data: [] });
       getUser.mockReturnValue(null);
       upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
@@ -237,27 +276,23 @@ describe('usePhysicalExamCameraImages', () => {
         usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
       );
 
-      // Add 2 images to q1 and 1 to q2 → flat order is [q1#0, q1#1, q2#0]
       await act(async () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
         await result.current.addCameraImage('q1', new File(['b'], 'b.png'));
-        await result.current.addCameraImage('q2', new File(['c'], 'c.png'));
       });
 
-      // Remove q1's second image — its flat index is 1 (after q1#0)
       act(() => {
         result.current.removeCameraImage('q1', 1);
       });
-      expect(removePendingImage).toHaveBeenLastCalledWith(1);
-      expect(result.current.cameraImagesFor('q1')).toEqual([
-        'data:image/png;base64,xxx',
-      ]);
+      // Uses removePendingImagesByQuestionId instead of flat index
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('q1');
+      expect(result.current.cameraImagesFor('q1')).toHaveLength(1);
     });
 
-    it('skips the pending queue update when the removed image has no file (restored from temp-storage)', async () => {
+    it('deletes the asset record when the removed image has an assetRecordId', async () => {
       getChildResources.mockResolvedValue({
         data: [
-          { id: 1, file_path: 'http://cdn/a.png', data: { questionId: 'q1' } },
+          { id: 42, file_path: 'http://cdn/a.png', data: { questionId: 'q1' } },
         ],
       });
       const { result } = renderHook(() =>
@@ -267,20 +302,21 @@ describe('usePhysicalExamCameraImages', () => {
         expect(result.current.cameraImagesFor('q1').length).toBe(1)
       );
       act(() => result.current.removeCameraImage('q1', 0));
-      expect(removePendingImage).not.toHaveBeenCalled();
+      expect(deleteAssetResource).toHaveBeenCalledWith(42);
       expect(result.current.cameraImagesFor('q1')).toEqual([]);
     });
 
-    it('is a no-op on the pending queue when the index is out of range', async () => {
+    it('handles removing from a question with no images gracefully', () => {
       getChildResources.mockResolvedValue({ data: [] });
       const { result } = renderHook(() =>
-        usePhysicalExamCameraImages({ visitId: null, sectionCommentFor })
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
       );
-      act(() => result.current.removeCameraImage('q1', 0));
-      expect(removePendingImage).not.toHaveBeenCalled();
+      act(() => result.current.removeCameraImage('nonexistent', 0));
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('nonexistent');
+      expect(result.current.cameraImagesFor('nonexistent')).toEqual([]);
     });
 
-    it('counts files of preceding questions into flat index when removing from a later question', async () => {
+    it('unmarks the question as committed when all images are removed', async () => {
       getChildResources.mockResolvedValue({ data: [] });
       getUser.mockReturnValue(null);
       upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
@@ -289,18 +325,12 @@ describe('usePhysicalExamCameraImages', () => {
         usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
       );
 
-      // Insertion order: q1 (2 files), q2 (1 file). Pending queue order is
-      // [q1#0, q1#1, q2#0]. Removing q2#0 must report flatIndex = 2 (after
-      // both q1 files), exercising the `flatIndex += imgs.filter(...).length`
-      // path for the non-target question.
       await act(async () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
-        await result.current.addCameraImage('q1', new File(['b'], 'b.png'));
-        await result.current.addCameraImage('q2', new File(['c'], 'c.png'));
       });
 
-      act(() => result.current.removeCameraImage('q2', 0));
-      expect(removePendingImage).toHaveBeenLastCalledWith(2);
+      act(() => result.current.removeCameraImage('q1', 0));
+      expect(unmarkQuestionCommitted).toHaveBeenCalledWith('q1');
     });
   });
 
@@ -314,15 +344,13 @@ describe('usePhysicalExamCameraImages', () => {
       );
       await waitFor(() => expect(getChildResources).toHaveBeenCalledTimes(1));
 
-      // visitId change re-fires the effect, but `hasRestoredRef.current` is
-      // true so the early-return guard kicks in — getChildResources stays at 1.
       rerender({ visitId: 'visit-2' });
       expect(getChildResources).toHaveBeenCalledTimes(1);
     });
   });
 
   describe('clearCameraImages', () => {
-    it('clears the question and rebuilds the pending queue from remaining images', async () => {
+    it('clears the question images and removes from pending queue by questionId', async () => {
       getChildResources.mockResolvedValue({ data: [] });
       getUser.mockReturnValue(null);
       upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
@@ -334,38 +362,104 @@ describe('usePhysicalExamCameraImages', () => {
         await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
         await result.current.addCameraImage('q2', new File(['b'], 'b.png'));
       });
-      addPendingImage.mockClear();
 
       act(() => result.current.clearCameraImages('q1'));
 
-      expect(clearPendingImages).toHaveBeenCalled();
-      // q2's image stays — its pending entry is re-added; q1 is cleared
-      expect(addPendingImage).toHaveBeenCalledTimes(1);
-      expect(addPendingImage.mock.calls[0][1]).toBe('Section for q2');
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('q1');
+      expect(unmarkQuestionCommitted).toHaveBeenCalledWith('q1');
       expect(result.current.cameraImagesFor('q1')).toEqual([]);
-      expect(result.current.cameraImagesFor('q2')).toEqual([
-        'data:image/png;base64,xxx',
-      ]);
+      // q2 is untouched
+      expect(result.current.cameraImagesFor('q2')).toHaveLength(1);
     });
 
-    it('does not re-add restored (file-less) images to the pending queue', async () => {
+    it('handles clearing a question with no images gracefully', () => {
+      getChildResources.mockResolvedValue({ data: [] });
+      const { result } = renderHook(() =>
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
+      );
+      act(() => result.current.clearCameraImages('nonexistent'));
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('nonexistent');
+      expect(unmarkQuestionCommitted).toHaveBeenCalledWith('nonexistent');
+      expect(deleteAssetResource).not.toHaveBeenCalled();
+    });
+
+    it('deletes asset records for restored images when clearing', async () => {
       getChildResources.mockResolvedValue({
         data: [
-          { id: 1, file_path: 'http://cdn/a.png', data: { questionId: 'q2' } },
+          { id: 5, file_path: 'http://cdn/a.png', data: { questionId: 'q1' } },
         ],
       });
       const { result } = renderHook(() =>
         usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
       );
       await waitFor(() =>
-        expect(result.current.cameraImagesFor('q2').length).toBe(1)
+        expect(result.current.cameraImagesFor('q1').length).toBe(1)
       );
-      addPendingImage.mockClear();
 
       act(() => result.current.clearCameraImages('q1'));
-      expect(clearPendingImages).toHaveBeenCalled();
-      // q2's image has no `file` (restored), so it's NOT re-added to pending
+      expect(deleteAssetResource).toHaveBeenCalledWith(5);
+      expect(result.current.cameraImagesFor('q1')).toEqual([]);
+    });
+  });
+
+  describe('commitQuestionImages', () => {
+    it('moves captured files from internal store to the pending queue', async () => {
+      getChildResources.mockResolvedValue({ data: [] });
+      getUser.mockReturnValue(null);
+      upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
+
+      const { result } = renderHook(() =>
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
+      );
+      const file = new File(['a'], 'a.png');
+      await act(async () => {
+        await result.current.addCameraImage('q1', file);
+      });
+
+      act(() => result.current.commitQuestionImages('q1'));
+
+      // Clears any previously committed entries for the question
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('q1');
+      // Adds the file to the pending queue
+      expect(addPendingImage).toHaveBeenCalledWith(
+        file,
+        'Section for q1',
+        'q1'
+      );
+      expect(markQuestionCommitted).toHaveBeenCalledWith('q1');
+    });
+
+    it('re-commits when called multiple times (handles re-upload)', async () => {
+      getChildResources.mockResolvedValue({ data: [] });
+      getUser.mockReturnValue(null);
+      upsertAssetResource.mockResolvedValue({ data: { id: 1 } });
+
+      const { result } = renderHook(() =>
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
+      );
+      await act(async () => {
+        await result.current.addCameraImage('q1', new File(['a'], 'a.png'));
+      });
+
+      act(() => result.current.commitQuestionImages('q1'));
+      act(() => result.current.commitQuestionImages('q1'));
+
+      // removePendingImagesByQuestionId called twice (once per commit)
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledTimes(2);
+      expect(addPendingImage).toHaveBeenCalledTimes(2);
+    });
+
+    it('does nothing when no files are captured for the question', () => {
+      getChildResources.mockResolvedValue({ data: [] });
+      const { result } = renderHook(() =>
+        usePhysicalExamCameraImages({ visitId: 'visit-1', sectionCommentFor })
+      );
+
+      act(() => result.current.commitQuestionImages('q1'));
+
+      expect(removePendingImagesByQuestionId).toHaveBeenCalledWith('q1');
       expect(addPendingImage).not.toHaveBeenCalled();
+      expect(markQuestionCommitted).not.toHaveBeenCalled();
     });
   });
 });

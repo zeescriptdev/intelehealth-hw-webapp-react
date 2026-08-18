@@ -11,16 +11,17 @@ outside this repo. Ask the owner (**@Zeeshan-IH**) if you need it.
 
 ## When it runs
 
-The model runs only when somebody asks, by adding the **`review-again`** label. Opening a
-PR or pushing to one costs nothing.
+A pull request is reviewed automatically when it is opened. Pushing to it does not
+re-review — that only marks the result stale; add the **`review-again`** label for a
+fresh one.
 
 The check still reports on every `pull_request` event, because it is a required check and
 one that never reports leaves a PR unmergeable forever:
 
 | Event                              | Check                         | Requests |
 | ---------------------------------- | ----------------------------- | -------- |
-| PR opened / reopened / ready       | 🔴 review not requested       | 0        |
-| Push to an open PR                 | 🔴 code changed               | 0        |
+| PR opened / reopened / ready       | 🔴 on findings, 🟢 when clean | ≤ 4      |
+| Push to an open PR                 | 🔴 review is stale            | 0        |
 | `review-again` label               | 🔴 on findings, 🟢 when clean | ≤ 4      |
 | Draft, or a PR into another branch | 🟢 not gated                  | 0        |
 

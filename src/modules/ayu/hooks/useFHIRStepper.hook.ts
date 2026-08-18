@@ -18,6 +18,12 @@ import type {
 } from '../../ayu-library/types/ayu.types';
 import {
   EXT_URL_PE_OPTION_KIND,
+  FHIR_TYPE_CHOICE,
+  FHIR_TYPE_DATE,
+  FHIR_TYPE_GROUP,
+  FHIR_TYPE_INTEGER,
+  FHIR_TYPE_QUANTITY,
+  FHIR_TYPE_STRING,
   PE_OPTION_KIND_CAMERA,
 } from '../../ayu-library/utils/constants';
 import {
@@ -63,6 +69,11 @@ interface UseFHIRStepperReturn {
     question: AyuQuestion,
     questionAnswers: Record<string, AyuAnswerValue>
   ) => boolean;
+  /** True when images are captured but the UPLOAD button was not clicked. */
+  isCameraNotUploaded: (
+    question: AyuQuestion,
+    questionAnswers: Record<string, AyuAnswerValue>
+  ) => boolean;
 }
 
 export const useFHIRStepper = (
@@ -94,7 +105,7 @@ export const useFHIRStepper = (
   const peCamera = usePhysicalExamCamera();
   const topLevelItems = useMemo(() => {
     const items = questionnaire?.item || [];
-    return items.filter((item: AyuQuestion) => item.type !== 'group');
+    return items.filter((item: AyuQuestion) => item.type !== FHIR_TYPE_GROUP);
   }, [questionnaire]);
 
   const structuralTotal = topLevelItems.length;
@@ -131,6 +142,33 @@ export const useFHIRStepper = (
     return peCamera.cameraImagesFor(question.linkId).length === 0;
   };
 
+  /**
+   * Images were captured in the camera UI but the user never clicked the
+   * UPLOAD button, so cameraCode is NOT in the committed answer yet.
+   */
+  const isCameraNotUploaded = (
+    question: AyuQuestion,
+    questionAnswers: Record<string, AyuAnswerValue>
+  ): boolean => {
+    if (!peCamera) return false;
+    const cameraCode = question.answerOption?.find(o =>
+      o.extension?.some(
+        e =>
+          e.url === EXT_URL_PE_OPTION_KIND &&
+          e.valueString === PE_OPTION_KIND_CAMERA
+      )
+    )?.valueCoding?.code;
+    if (!cameraCode) return false;
+    const answer = questionAnswers[question.linkId];
+    const codes = Array.isArray(answer)
+      ? answer
+      : typeof answer === 'string'
+        ? [answer]
+        : [];
+    if (codes.includes(cameraCode)) return false;
+    return peCamera.cameraImagesFor(question.linkId).length > 0;
+  };
+
   const goNext = () => {
     if (showAll) {
       handleComplete();
@@ -157,6 +195,16 @@ export const useFHIRStepper = (
         ? index + questionIndexOffset + 1
         : undefined;
 
+      // Images captured but UPLOAD button not clicked — show specific message
+      if (isCameraNotUploaded(question, latestAnswers)) {
+        showToast(
+          validationMessageForReason('uploadCapturedImage', questionNumber),
+          undefined,
+          'warning'
+        );
+        return false;
+      }
+
       // Required questions must have an answer
       if (question.required && isEmpty(answer)) {
         showToast(
@@ -171,7 +219,8 @@ export const useFHIRStepper = (
         const result = validateQuestion(
           question,
           latestAnswers,
-          isCameraAnswerMissingImages
+          isCameraAnswerMissingImages,
+          isCameraNotUploaded
         );
         if (!result.valid) {
           showToast(
@@ -258,7 +307,7 @@ export const useFHIRStepper = (
       let finalValue: AyuAnswerValue = value;
 
       // Handle repeats (multi-select toggle)
-      if (question.type === 'choice' && question.repeats) {
+      if (question.type === FHIR_TYPE_CHOICE && question.repeats) {
         if (Array.isArray(value)) {
           // Value is a pre-computed array (e.g. from AyuAssociatedSymptoms) — store directly.
           finalValue = value;
@@ -290,10 +339,10 @@ export const useFHIRStepper = (
 
       // Disable autoNext for input-based questions — user must explicitly submit
       if (
-        currentQuestion.type === 'string' ||
-        currentQuestion.type === 'date' ||
-        currentQuestion.type === 'integer' ||
-        currentQuestion.type === 'quantity'
+        currentQuestion.type === FHIR_TYPE_STRING ||
+        currentQuestion.type === FHIR_TYPE_DATE ||
+        currentQuestion.type === FHIR_TYPE_INTEGER ||
+        currentQuestion.type === FHIR_TYPE_QUANTITY
       ) {
         return updated;
       }
@@ -313,13 +362,13 @@ export const useFHIRStepper = (
         for (const child of items) {
           if (!evaluateEnableWhen(child.enableWhen, answers)) continue;
           if (
-            child.type === 'string' ||
-            child.type === 'date' ||
-            child.type === 'integer' ||
-            child.type === 'quantity'
+            child.type === FHIR_TYPE_STRING ||
+            child.type === FHIR_TYPE_DATE ||
+            child.type === FHIR_TYPE_INTEGER ||
+            child.type === FHIR_TYPE_QUANTITY
           )
             return { hasString: true, hasRepeats: false };
-          if (child.type === 'choice' && child.repeats)
+          if (child.type === FHIR_TYPE_CHOICE && child.repeats)
             return { hasString: false, hasRepeats: true };
           const deep = hasVisibleStringOrRepeatsDeep(child.item, answers);
           if (deep.hasString || deep.hasRepeats) return deep;
@@ -333,16 +382,15 @@ export const useFHIRStepper = (
       );
       const hasVisibleStringChild = deepCheck.hasString;
 
-      const isLastQuestion = currentIndex === structuralTotal - 1;
-
       const hasNestedRepeats = deepCheck.hasRepeats;
 
       if (
         shouldMoveNext &&
         !hasVisibleStringChild &&
         !isAdvancingRef.current &&
-        (!isLastQuestion || skipSummary) &&
-        !(currentQuestion.type === 'choice' && currentQuestion.repeats) &&
+        !(
+          currentQuestion.type === FHIR_TYPE_CHOICE && currentQuestion.repeats
+        ) &&
         !hasNestedRepeats &&
         !showAll
       ) {
@@ -382,5 +430,6 @@ export const useFHIRStepper = (
     showAll,
     validateAllQuestions,
     isCameraAnswerMissingImages,
+    isCameraNotUploaded,
   };
 };

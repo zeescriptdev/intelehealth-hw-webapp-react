@@ -99,7 +99,7 @@ export const VitalConfirmationModal = ({
 
           {hasSections ? (
             /* ---- SECTIONS MODE ---- */
-            <div className="mt-4 space-y-5 sm:max-h-[350px] sm:overflow-y-auto sm:pr-2">
+            <div className="mt-4 space-y-5 sm:max-h-[350px] sm:overflow-y-auto sm:overflow-x-hidden sm:pr-2">
               {(() => {
                 const firstChangeIdx = sections.findIndex(s => !!s.onChange);
                 return sections.map((section, sIdx) => (
@@ -136,10 +136,11 @@ export const VitalConfirmationModal = ({
                     <div className="mt-2 space-y-2">
                       {section.items.map((item, iIdx) => {
                         if (item.type === 'labelValue') {
+                          const isChild = 'isChild' in item && item.isChild;
                           return (
                             <div
                               key={iIdx}
-                              className={`  ${size === 'lg' ? 'grid grid-cols-[0px_240px_260px] gap-4 ' : 'grid grid-cols-[0px 150px 1fr] gap-2'} items-center text-sm w-full`}
+                              className={`${isChild ? (size === 'lg' ? 'ml-6 grid grid-cols-[0px_200px_1fr] gap-4 ' : 'ml-6 grid grid-cols-[0px_120px_1fr] gap-2 ') : size === 'lg' ? 'grid grid-cols-[0px_240px_260px] gap-4 ' : 'grid grid-cols-[0px_150px_1fr] gap-2 '}items-center text-sm w-full`}
                             >
                               <span className="text-gray-500 font-bold">
                                 &#8226;

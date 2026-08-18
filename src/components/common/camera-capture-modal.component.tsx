@@ -1,4 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
+import {
+  CAMERA_MAX_RETRIES,
+  CAMERA_RETRY_DELAY_MS,
+} from '../../utils/constant';
 
 interface CameraCaptureModalProps {
   isOpen: boolean;
@@ -13,42 +17,71 @@ const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const requestIdRef = useRef(0);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
     if (isOpen) {
-      startCamera();
+      /*
+       * Increment request ID so any in-flight getUserMedia from a previous
+       * cycle (e.g. React Strict Mode double-mount) is discarded on resolve.
+       */
+      const currentRequestId = ++requestIdRef.current;
+      stopCamera();
+      startCamera(currentRequestId);
       document.body.style.overflow = 'hidden';
     }
     return () => {
       document.body.style.overflow = 'unset';
+      /* Invalidate any pending startCamera call */
+      requestIdRef.current++;
       stopCamera();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
-  const startCamera = async () => {
+  const startCamera = async (requestId: number, retryCount = 0) => {
     try {
-      setError('');
-      setIsCameraReady(false);
+      if (retryCount === 0) {
+        setError('');
+        setIsCameraReady(false);
+      }
 
       if (!navigator.mediaDevices?.getUserMedia) {
         setError('Camera not supported on this device');
         return;
       }
 
+      /*
+       * Use relaxed constraints on final retry — some Windows drivers
+       * struggle with specific facingMode / resolution constraints.
+       */
+      const videoConstraints: MediaTrackConstraints | boolean =
+        retryCount < CAMERA_MAX_RETRIES - 1
+          ? {
+              facingMode: 'user',
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+            }
+          : true;
+
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'user',
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-        },
+        video: videoConstraints,
         audio: false,
       });
 
-      setStream(mediaStream);
+      /*
+       * If this request is no longer current (modal closed, or a newer
+       * startCamera was triggered), stop the stream immediately.
+       */
+      if (requestId !== requestIdRef.current) {
+        mediaStream.getTracks().forEach(track => track.stop());
+        return;
+      }
+
+      streamRef.current = mediaStream;
 
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
@@ -64,6 +97,28 @@ const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
       }
     } catch (err) {
       if (err instanceof Error) {
+        /*
+         * Retry on hardware-release timing errors (camera driver hasn't
+         * fully released yet from a previous session / rapid re-open).
+         */
+        const isHardwareError =
+          err.name === 'NotReadableError' || err.name === 'TrackStartError';
+
+        if (
+          isHardwareError &&
+          retryCount < CAMERA_MAX_RETRIES &&
+          requestId === requestIdRef.current
+        ) {
+          await new Promise(resolve =>
+            setTimeout(resolve, CAMERA_RETRY_DELAY_MS * (retryCount + 1))
+          );
+          /* Re-check after delay — modal may have closed during the wait */
+          if (requestId === requestIdRef.current) {
+            return startCamera(requestId, retryCount + 1);
+          }
+          return;
+        }
+
         const errorMap: Record<string, string> = {
           NotAllowedError:
             'Camera permission denied. Please allow camera access.',
@@ -71,8 +126,10 @@ const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
             'Camera permission denied. Please allow camera access.',
           NotFoundError: 'No camera found on this device.',
           DevicesNotFoundError: 'No camera found on this device.',
-          NotReadableError: 'Camera is already in use by another application.',
-          TrackStartError: 'Camera is already in use by another application.',
+          NotReadableError:
+            'Camera is already in use. Please close other apps using the camera and try again.',
+          TrackStartError:
+            'Camera is already in use. Please close other apps using the camera and try again.',
         };
         setError(
           errorMap[err.name] || 'Failed to access camera. Please try again.'
@@ -82,8 +139,11 @@ const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   };
 
   const stopCamera = () => {
-    stream?.getTracks().forEach(track => track.stop());
-    setStream(null);
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
   };
 
   const capturePhoto = () => {
@@ -99,7 +159,7 @@ const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Mirror image for selfie mode
+    /* Mirror image for selfie mode */
     ctx.save();
     ctx.translate(canvas.width, 0);
     ctx.scale(-1, 1);

@@ -93,13 +93,13 @@ jobs:
           # Set proper permissions for the key file
           chmod 600 ~/.ssh/dev_server.pem
           # Add server to known hosts to avoid host key verification prompt
-          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+          ssh-keyscan -H ${{ secrets.DEV_HOST }} >> ~/.ssh/known_hosts
           echo "✅ SSH key setup completed!"
 
       - name: 🧪 Test Server Connection
         run: |
           echo "🧪 Testing connection to development server..."
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "echo 'Connection successful!'"
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "echo 'Connection successful!'"
           echo "✅ Server connection test passed!"
 
       - name: 🚀 Deploy to Development Server
@@ -121,7 +121,7 @@ jobs:
           echo "📁 Backup path: ${{ secrets.BACKUP_PATH }}"
 
           # Create deployment directory on server
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "
             echo 'Creating directories...'
             # Create backup directory
             sudo mkdir -p '${{ secrets.BACKUP_PATH }}'
@@ -141,7 +141,7 @@ jobs:
           "
 
           # Backup current deployment (if exists)
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "
             if [ -d '${{ secrets.DEPLOY_PATH }}' ] && [ \"\$(ls -A ${{ secrets.DEPLOY_PATH }})\" ]; then
               echo '📦 Creating backup of current deployment...'
               cp -r ${{ secrets.DEPLOY_PATH }}/* ${{ secrets.BACKUP_PATH }}/ 2>/dev/null || true
@@ -155,10 +155,10 @@ jobs:
           echo "📤 Uploading build files to server..."
           rsync -avz --delete --progress -e "ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no" \
             dist/ \
-            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.DEPLOY_PATH }}/temp/
+            ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }}:${{ secrets.DEPLOY_PATH }}/temp/
 
           # Debug: Check what was uploaded to temp
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "
             echo '🔍 Debug: Contents uploaded to temp directory:'
             find '${{ secrets.DEPLOY_PATH }}/temp' -type f | head -20
             echo '📊 Total files in temp:'
@@ -166,7 +166,7 @@ jobs:
           "
 
           # Move files from temp to final location and set permissions
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "
             echo '🔄 Moving files to final location...'
             
             # Move files from temp to final location (including hidden files and directories)
@@ -215,7 +215,7 @@ jobs:
           "
 
           # Update web server configuration (if needed)
-          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+          ssh -i ~/.ssh/dev_server.pem -o StrictHostKeyChecking=no ${{ secrets.SERVER_USER }}@${{ secrets.DEV_HOST }} "
             echo '🌐 Updating web server configuration...'
             echo '✅ Web server configuration updated!'
           "
@@ -252,7 +252,7 @@ jobs:
             DEPLOYMENT_TIME=$(TZ='Asia/Kolkata' date '+%Y-%m-%d %H:%M:%S IST')
             TIMESTAMP=$(date +%s)
             
-            SLACK_MESSAGE="{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"username\":\"GitHub Actions\",\"icon_emoji\":\":rocket:\",\"attachments\":[{\"color\":\"$STATUS_COLOR\",\"title\":\"$STATUS_EMOJI Development Deployment $STATUS_TEXT\",\"title_link\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",\"fields\":[{\"title\":\"Repository\",\"value\":\"${{ github.repository }}\",\"short\":true},{\"title\":\"Branch\",\"value\":\"${{ github.ref_name }}\",\"short\":true},{\"title\":\"Commit\",\"value\":\"<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\",\"short\":true},{\"title\":\"Author\",\"value\":\"${{ github.actor }}\",\"short\":true},{\"title\":\"Environment\",\"value\":\"Development\",\"short\":true},{\"title\":\"Deployment Time\",\"value\":\"$DEPLOYMENT_TIME\",\"short\":true},{\"title\":\"Server\",\"value\":\"${{ secrets.SERVER_HOST }}\",\"short\":true}],\"footer\":\"GitHub Actions\",\"footer_icon\":\"https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png\",\"ts\":$TIMESTAMP}]}"
+            SLACK_MESSAGE="{\"channel\":\"${{ secrets.SLACK_CHANNEL }}\",\"username\":\"GitHub Actions\",\"icon_emoji\":\":rocket:\",\"attachments\":[{\"color\":\"$STATUS_COLOR\",\"title\":\"$STATUS_EMOJI Development Deployment $STATUS_TEXT\",\"title_link\":\"${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\",\"fields\":[{\"title\":\"Repository\",\"value\":\"${{ github.repository }}\",\"short\":true},{\"title\":\"Branch\",\"value\":\"${{ github.ref_name }}\",\"short\":true},{\"title\":\"Commit\",\"value\":\"<${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}|${{ github.sha }}>\",\"short\":true},{\"title\":\"Author\",\"value\":\"${{ github.actor }}\",\"short\":true},{\"title\":\"Environment\",\"value\":\"Development\",\"short\":true},{\"title\":\"Deployment Time\",\"value\":\"$DEPLOYMENT_TIME\",\"short\":true},{\"title\":\"Server\",\"value\":\"${{ secrets.DEV_HOST }}\",\"short\":true}],\"footer\":\"GitHub Actions\",\"footer_icon\":\"https://github.githubassets.com/images/modules/logos_page/GitHub-Mark.png\",\"ts\":$TIMESTAMP}]}"
 
             # Send notification to Slack
             curl -X POST -H 'Content-type: application/json' \

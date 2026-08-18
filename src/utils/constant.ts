@@ -1,3 +1,10 @@
+/*
+ * Camera capture retry settings — used by CameraCaptureModal to recover
+ * from NotReadableError / TrackStartError when the OS camera driver has
+ * not fully released the device yet.
+ */
+export const CAMERA_MAX_RETRIES = 3;
+export const CAMERA_RETRY_DELAY_MS = 600;
 export const ADD_PATIENT_LABEL = 'Add Patient';
 export const PATIENT_DETAILS_LABEL = 'Patient Details';
 

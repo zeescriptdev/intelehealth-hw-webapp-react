@@ -28,8 +28,14 @@
   transition: all 0.2s ease;
 }
 
-.selectable-option:hover:not(.selected) {
+.selectable-option:hover:not(.selected):not(.disabled) {
   background-color: #e5fff3;
+}
+
+.selectable-option.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  border-color: #ccc;
 }
 
 .selectable-option.selected {

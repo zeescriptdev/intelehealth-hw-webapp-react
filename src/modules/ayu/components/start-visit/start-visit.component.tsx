@@ -11,7 +11,13 @@ import {
 import iconStartVisit from '../../../ayu/assets/icon-start-visit.svg';
 import { useStartVisitData } from '../../context/start-visit.context';
 import { useVisitReasons } from '../../hooks/useVisitReasons.hook';
+import { clearPendingImages } from '../../services/obs.service';
 import {
+  clearCommittedQuestionIds,
+  clearDeletedAssetIds,
+} from '../../services/temp-storage.service';
+import {
+  BREADCRUMB_STATUS_PENDING,
   PATIENT_AGE_KEY,
   PATIENT_GENDER_KEY,
   PATIENT_NAME_KEY,
@@ -80,8 +86,6 @@ export const StartVisit = () => {
   const { ayuConfigFiles } = visitReasons;
   const [confirmedReasons, setConfirmedReasons] = useState<string[]>([]);
   const [medicalHistorySubtitle, setMedicalHistorySubtitle] = useState('');
-  // Bumped to force Physical Exam / Medical History to remount (and re-init
-  // from the now-cleared context) when a protocol is removed.
   const [downstreamResetKey, setDownstreamResetKey] = useState(0);
 
   const handleReasonsConfirmed = useCallback((reasons: string[]) => {
@@ -91,6 +95,9 @@ export const StartVisit = () => {
   const handleProtocolCleared = useCallback(() => {
     clearPhysicalExamData();
     clearMedicalHistoryData();
+    clearPendingImages();
+    clearDeletedAssetIds();
+    clearCommittedQuestionIds();
     saveSectionToTemp({
       physicalExam: null,
       medicalHistory: null,
@@ -124,12 +131,6 @@ export const StartVisit = () => {
     }
   };
 
-  /*
-   * Derive the physical-exam filter from the protocol(s) the user actually
-   * selected, not a hardcoded one. When multiple protocols are selected their
-   * filter strings are concatenated with ';' so parsePhysicalExamFilter merges
-   * the allowed sections/questions across all of them.
-   */
   const physicalExamFilter = useMemo(
     () =>
       visitReasons.selectedComplaints
@@ -225,15 +226,14 @@ export const StartVisit = () => {
           ? 'completed'
           : index === currentSectionIndex
             ? 'active'
-            : 'pending') as 'completed' | 'active' | 'pending',
+            : BREADCRUMB_STATUS_PENDING) as 'completed' | 'active' | 'pending',
         ...(index < currentSectionIndex && {
           onClick: () => goToSection(index),
         }),
       }))
-      .filter(item => item.status !== 'pending'),
+      .filter(item => item.status !== BREADCRUMB_STATUS_PENDING),
   ]);
 
-  // Scroll to the top of the main container when the section changes
   useEffect(() => {
     const mainContainerContent = document.getElementById(
       'main-container-content'
@@ -243,16 +243,10 @@ export const StartVisit = () => {
     }
   }, [currentSectionIndex]);
 
-  /*
-   * Assessment Progress loader is hidden on Vitals and on the visit-reason
-   * protocol/reason selection screen. It appears once the question stepper
-   * starts and stays visible through Physical Exam and Medical History.
-   */
   const showAssessmentProgress =
     currentSectionIndex > 1 ||
     (currentSectionIndex === 1 && isVisitReasonStepperActive);
 
-  // Restore section index from temp-storage data after context finishes loading
   useEffect(() => {
     if (isRestoring || hasRestored) return;
     setHasRestored(true);
@@ -280,11 +274,6 @@ export const StartVisit = () => {
       setCurrentSectionIndex(restoreIndex);
     }
 
-    /*
-     * Mark any section as completed if its data exists in restoredData,
-     * independent of restoreIndex, so the section completion loader reflects
-     * the true saved state after refresh.
-     */
     setSections(prev =>
       prev.map(s => {
         const hasData =
@@ -312,10 +301,6 @@ export const StartVisit = () => {
     const section = sections[currentSectionIndex];
     const total = section.totalQuestions;
 
-    /*
-     * Section already completed in context (Confirm on revisit / after refresh);
-     * go straight to next section regardless of sections[] counters.
-     */
     if (isCurrentSectionCompleted()) {
       goNextSection();
       return;
@@ -376,7 +361,6 @@ export const StartVisit = () => {
             : section
         )
       );
-      // SYNC SIDE LOADER INDEX HERE
       setCurrentQuestionIndex(answered);
     },
     []
@@ -447,7 +431,6 @@ export const StartVisit = () => {
             )}
           </div>
         </div>
-        {/* Top Loader */}
         {showAssessmentProgress && (
           <div className="pt-3">
             <SectionCompletionLoader
@@ -457,7 +440,6 @@ export const StartVisit = () => {
           </div>
         )}
 
-        {/* Side Loader */}
         {showAssessmentProgress &&
           sections[currentSectionIndex]?.totalQuestions > 1 && (
             <div className="hidden md:block">
@@ -469,7 +451,6 @@ export const StartVisit = () => {
             </div>
           )}
 
-        {/* Active Section */}
         {currentSectionIndex === 0 && (
           <Vitals
             questionIndex={currentQuestionIndex}

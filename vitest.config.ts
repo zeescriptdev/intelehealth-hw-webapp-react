@@ -94,7 +94,7 @@ export default defineConfig({
         'src/config/sentry.ts',
         'src/config/sentry-wrapper.tsx',
         'src/config/env.ts',
-        'src/components/common/**',
+        'src/components/common/**/!(camera-capture-modal)*.{ts,tsx}',
         // Exclude profile-related files (tests were removed)
         'src/assets/data/**',
         // Exclude Loader component (not tested)

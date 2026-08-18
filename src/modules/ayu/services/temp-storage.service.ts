@@ -99,3 +99,87 @@ export function bulkMarkSynced(
     TempStorageApiResponse<{ updatedCount: number }>
   >(TEMP_STORAGE_ENDPOINTS.SYNC, { ids });
 }
+
+export function deleteAssetResource(
+  recordId: number
+): Promise<TempStorageApiResponse<null>> {
+  markAssetDeleted(recordId);
+  return MindmapPortalApi.delete<TempStorageApiResponse<null>>(
+    `${TEMP_STORAGE_ENDPOINTS.ROOT}/${recordId}`
+  );
+}
+
+const DELETED_ASSETS_KEY = 'pe_deleted_asset_ids';
+
+function markAssetDeleted(id: number): void {
+  const ids = getDeletedAssetIds();
+  ids.add(id);
+  try {
+    sessionStorage.setItem(DELETED_ASSETS_KEY, JSON.stringify([...ids]));
+    /* v8 ignore next */
+  } catch {
+    /* v8 ignore next */
+  }
+}
+
+export function getDeletedAssetIds(): Set<number> {
+  try {
+    const raw = sessionStorage.getItem(DELETED_ASSETS_KEY);
+    return raw ? new Set(JSON.parse(raw) as number[]) : new Set();
+    /* v8 ignore next 3 */
+  } catch {
+    return new Set();
+  }
+}
+
+export function clearDeletedAssetIds(): void {
+  try {
+    sessionStorage.removeItem(DELETED_ASSETS_KEY);
+    /* v8 ignore next */
+  } catch {
+    /* v8 ignore next */
+  }
+}
+
+const COMMITTED_QUESTIONS_KEY = 'pe_committed_question_ids';
+
+export function markQuestionCommitted(questionId: string): void {
+  const ids = getCommittedQuestionIds();
+  ids.add(questionId);
+  try {
+    sessionStorage.setItem(COMMITTED_QUESTIONS_KEY, JSON.stringify([...ids]));
+    /* v8 ignore next */
+  } catch {
+    /* v8 ignore next */
+  }
+}
+
+export function unmarkQuestionCommitted(questionId: string): void {
+  const ids = getCommittedQuestionIds();
+  ids.delete(questionId);
+  try {
+    sessionStorage.setItem(COMMITTED_QUESTIONS_KEY, JSON.stringify([...ids]));
+    /* v8 ignore next */
+  } catch {
+    /* v8 ignore next */
+  }
+}
+
+export function getCommittedQuestionIds(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(COMMITTED_QUESTIONS_KEY);
+    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    /* v8 ignore next 3 */
+  } catch {
+    return new Set();
+  }
+}
+
+export function clearCommittedQuestionIds(): void {
+  try {
+    sessionStorage.removeItem(COMMITTED_QUESTIONS_KEY);
+    /* v8 ignore next */
+  } catch {
+    /* v8 ignore next */
+  }
+}

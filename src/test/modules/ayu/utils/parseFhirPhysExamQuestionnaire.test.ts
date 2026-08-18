@@ -191,6 +191,33 @@ describe('parseFhirPhysExamQuestionnaire', () => {
     expect(q.jobAidFile).toBe('demo');
   });
 
+  it('reads job-aid from legacy direct properties when extensions are absent', () => {
+    const raw: FhirQuestionnaire = {
+      resourceType: 'Questionnaire',
+      item: [
+        {
+          linkId: 's1',
+          text: 'Abdomen',
+          type: 'group',
+          item: [
+            {
+              linkId: 'q1',
+              text: 'Tenderness',
+              type: 'choice',
+              // Legacy direct properties instead of FHIR extensions
+              'job-aid-type': 'image',
+              'job-aid-file': 'abdominalregions9',
+              answerOption: [{ valueCoding: { code: 'a', display: 'A' } }],
+            } as never,
+          ],
+        },
+      ],
+    };
+    const q = parseFhirPhysExamQuestionnaire(raw)[0];
+    expect(q.jobAidType).toBe('image');
+    expect(q.jobAidFile).toBe('abdominalregions9');
+  });
+
   it('ignores invalid job-aid-type values', () => {
     const raw: FhirQuestionnaire = {
       resourceType: 'Questionnaire',

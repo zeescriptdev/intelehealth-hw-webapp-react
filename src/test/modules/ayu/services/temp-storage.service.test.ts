@@ -5,12 +5,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockGet = vi.fn();
 const mockPost = vi.fn();
 const mockPatch = vi.fn();
+const mockDelete = vi.fn();
 
 vi.mock('../../../../services/mindmap', () => ({
   MindmapPortalApi: {
     get: (...args: unknown[]) => mockGet(...args),
     post: (...args: unknown[]) => mockPost(...args),
     patch: (...args: unknown[]) => mockPatch(...args),
+    delete: (...args: unknown[]) => mockDelete(...args),
   },
 }));
 
@@ -21,6 +23,13 @@ import {
   getChildResources,
   getPendingResources,
   bulkMarkSynced,
+  deleteAssetResource,
+  getDeletedAssetIds,
+  clearDeletedAssetIds,
+  markQuestionCommitted,
+  unmarkQuestionCommitted,
+  getCommittedQuestionIds,
+  clearCommittedQuestionIds,
   TEMP_STORAGE_ENDPOINTS,
 } from '../../../../modules/ayu/services/temp-storage.service';
 
@@ -226,6 +235,218 @@ describe('temp-storage.service', () => {
 
       expect(mockPatch).toHaveBeenCalledWith('/temp-storage/sync', { ids: [1, 2] });
       expect(result).toEqual(mockResponse);
+    });
+  });
+
+  describe('deleteAssetResource', () => {
+    it('should DELETE /temp-storage/:id and mark asset as deleted', async () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+
+      const result = await deleteAssetResource(42);
+
+      expect(mockDelete).toHaveBeenCalledWith('/temp-storage/42');
+      expect(result).toEqual({ success: true, data: null });
+      // Should be tracked as deleted
+      expect(getDeletedAssetIds().has(42)).toBe(true);
+    });
+
+    it('should mark asset as deleted even before the API call resolves', () => {
+      mockDelete.mockReturnValue(new Promise(() => {})); // never resolves
+
+      deleteAssetResource(99);
+
+      // Already tracked synchronously
+      expect(getDeletedAssetIds().has(99)).toBe(true);
+    });
+  });
+
+  describe('deleted-asset tracking (sessionStorage)', () => {
+    beforeEach(() => {
+      clearDeletedAssetIds();
+    });
+
+    it('should return empty set when no assets have been deleted', () => {
+      expect(getDeletedAssetIds().size).toBe(0);
+    });
+
+    it('should track multiple deleted asset IDs', () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+
+      deleteAssetResource(1);
+      deleteAssetResource(2);
+      deleteAssetResource(3);
+
+      const ids = getDeletedAssetIds();
+      expect(ids.size).toBe(3);
+      expect(ids.has(1)).toBe(true);
+      expect(ids.has(2)).toBe(true);
+      expect(ids.has(3)).toBe(true);
+    });
+
+    it('should not duplicate IDs when the same asset is deleted twice', () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+
+      deleteAssetResource(5);
+      deleteAssetResource(5);
+
+      expect(getDeletedAssetIds().size).toBe(1);
+    });
+
+    it('should clear all deleted asset IDs', () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+
+      deleteAssetResource(10);
+      deleteAssetResource(20);
+      clearDeletedAssetIds();
+
+      expect(getDeletedAssetIds().size).toBe(0);
+    });
+
+    it('should persist across calls (sessionStorage-backed)', () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+
+      deleteAssetResource(7);
+
+      // Reading again should return the same set
+      const ids1 = getDeletedAssetIds();
+      const ids2 = getDeletedAssetIds();
+      expect(ids1.has(7)).toBe(true);
+      expect(ids2.has(7)).toBe(true);
+    });
+  });
+
+  describe('committed-question tracking (sessionStorage)', () => {
+    beforeEach(() => {
+      clearCommittedQuestionIds();
+    });
+
+    it('should return empty set when no questions have been committed', () => {
+      expect(getCommittedQuestionIds().size).toBe(0);
+    });
+
+    it('should mark a question as committed', () => {
+      markQuestionCommitted('q1');
+
+      expect(getCommittedQuestionIds().has('q1')).toBe(true);
+    });
+
+    it('should track multiple committed question IDs', () => {
+      markQuestionCommitted('q1');
+      markQuestionCommitted('q2');
+      markQuestionCommitted('q3');
+
+      const ids = getCommittedQuestionIds();
+      expect(ids.size).toBe(3);
+      expect(ids.has('q1')).toBe(true);
+      expect(ids.has('q2')).toBe(true);
+      expect(ids.has('q3')).toBe(true);
+    });
+
+    it('should not duplicate IDs when the same question is committed twice', () => {
+      markQuestionCommitted('q1');
+      markQuestionCommitted('q1');
+
+      expect(getCommittedQuestionIds().size).toBe(1);
+    });
+
+    it('should unmark a question as committed', () => {
+      markQuestionCommitted('q1');
+      markQuestionCommitted('q2');
+
+      unmarkQuestionCommitted('q1');
+
+      const ids = getCommittedQuestionIds();
+      expect(ids.size).toBe(1);
+      expect(ids.has('q1')).toBe(false);
+      expect(ids.has('q2')).toBe(true);
+    });
+
+    it('should handle unmarking a question that was never committed', () => {
+      unmarkQuestionCommitted('nonexistent');
+
+      expect(getCommittedQuestionIds().size).toBe(0);
+    });
+
+    it('should clear all committed question IDs', () => {
+      markQuestionCommitted('q1');
+      markQuestionCommitted('q2');
+      clearCommittedQuestionIds();
+
+      expect(getCommittedQuestionIds().size).toBe(0);
+    });
+
+    it('should persist across calls (sessionStorage-backed)', () => {
+      markQuestionCommitted('q5');
+
+      const ids1 = getCommittedQuestionIds();
+      const ids2 = getCommittedQuestionIds();
+      expect(ids1.has('q5')).toBe(true);
+      expect(ids2.has('q5')).toBe(true);
+    });
+  });
+
+  describe('sessionStorage error handling', () => {
+    beforeEach(() => {
+      clearCommittedQuestionIds();
+      clearDeletedAssetIds();
+    });
+
+    it('getCommittedQuestionIds returns empty set when sessionStorage.getItem throws', () => {
+      const spy = vi.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
+        throw new Error('storage error');
+      });
+      expect(getCommittedQuestionIds().size).toBe(0);
+      spy.mockRestore();
+    });
+
+    it('clearCommittedQuestionIds does not throw when sessionStorage.removeItem throws', () => {
+      const spy = vi.spyOn(sessionStorage, 'removeItem').mockImplementation(() => {
+        throw new Error('storage error');
+      });
+      expect(() => clearCommittedQuestionIds()).not.toThrow();
+      spy.mockRestore();
+    });
+
+    it('unmarkQuestionCommitted does not throw when sessionStorage.setItem throws', () => {
+      markQuestionCommitted('q1');
+      const spy = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+        throw new Error('storage full');
+      });
+      expect(() => unmarkQuestionCommitted('q1')).not.toThrow();
+      spy.mockRestore();
+    });
+
+    it('markQuestionCommitted does not throw when sessionStorage.setItem throws', () => {
+      const spy = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+        throw new Error('storage full');
+      });
+      expect(() => markQuestionCommitted('q1')).not.toThrow();
+      spy.mockRestore();
+    });
+
+    it('getDeletedAssetIds returns empty set when sessionStorage.getItem throws', () => {
+      const spy = vi.spyOn(sessionStorage, 'getItem').mockImplementation(() => {
+        throw new Error('storage error');
+      });
+      expect(getDeletedAssetIds().size).toBe(0);
+      spy.mockRestore();
+    });
+
+    it('clearDeletedAssetIds does not throw when sessionStorage.removeItem throws', () => {
+      const spy = vi.spyOn(sessionStorage, 'removeItem').mockImplementation(() => {
+        throw new Error('storage error');
+      });
+      expect(() => clearDeletedAssetIds()).not.toThrow();
+      spy.mockRestore();
+    });
+
+    it('deleteAssetResource does not throw when sessionStorage.setItem throws', () => {
+      mockDelete.mockResolvedValue({ success: true, data: null });
+      const spy = vi.spyOn(sessionStorage, 'setItem').mockImplementation(() => {
+        throw new Error('storage full');
+      });
+      expect(() => deleteAssetResource(100)).not.toThrow();
+      spy.mockRestore();
     });
   });
 });

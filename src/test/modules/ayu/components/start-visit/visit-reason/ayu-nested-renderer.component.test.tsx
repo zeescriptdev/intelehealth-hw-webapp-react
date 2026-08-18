@@ -493,10 +493,11 @@ describe('AyuNestedRenderer', () => {
       expect(screen.getByTestId('selectable-int-1')).toBeInTheDocument();
     });
 
-    it('should render string-type children directly via AyuRenderer without selection', () => {
+    it('should render all children including string-type as selectable pills', () => {
       const items: AyuQuestion[] = [
         { linkId: 'string-1', text: 'String Item', type: 'string' },
         { linkId: 'choice-1', text: 'Choice Item', type: 'choice' },
+        { linkId: 'choice-2', text: 'Choice Item 2', type: 'choice' },
       ];
 
       render(
@@ -508,11 +509,12 @@ describe('AyuNestedRenderer', () => {
         />
       );
 
-      // String item rendered directly
-      expect(screen.getByTestId('renderer-string-1')).toBeInTheDocument();
-      // Choice item rendered as selectable pill
+      // All items rendered as selectable pills (including string)
+      expect(screen.getByTestId('selectable-string-1')).toBeInTheDocument();
       expect(screen.getByTestId('selectable-choice-1')).toBeInTheDocument();
-      // Choice item NOT rendered as AyuRenderer until selected
+      expect(screen.getByTestId('selectable-choice-2')).toBeInTheDocument();
+      // None rendered as AyuRenderer until selected
+      expect(screen.queryByTestId('renderer-string-1')).not.toBeInTheDocument();
       expect(screen.queryByTestId('renderer-choice-1')).not.toBeInTheDocument();
     });
 
@@ -520,6 +522,7 @@ describe('AyuNestedRenderer', () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         { linkId: 'choice-1', text: 'Choice Item', type: 'choice' },
+        { linkId: 'choice-2', text: 'Choice Item 2', type: 'choice' },
       ];
 
       render(
@@ -542,6 +545,7 @@ describe('AyuNestedRenderer', () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         { linkId: 'choice-1', text: 'Choice Item', type: 'choice' },
+        { linkId: 'choice-2', text: 'Choice Item 2', type: 'choice' },
       ];
 
       render(
@@ -565,6 +569,7 @@ describe('AyuNestedRenderer', () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         { linkId: 'choice-1', text: 'Choice Item', type: 'choice' },
+        { linkId: 'choice-2', text: 'Choice Item 2', type: 'choice' },
       ];
 
       const { container } = render(
@@ -584,10 +589,11 @@ describe('AyuNestedRenderer', () => {
       expect(svg).toHaveAttribute('fill', '#20c997');
     });
 
-    it('should not render arrow SVG for selected non-choice items', async () => {
+    it('should render arrow SVG for non-choice items when selected as pill', async () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         { linkId: 'int-1', text: 'Integer Item', type: 'integer' },
+        { linkId: 'int-2', text: 'Integer Item 2', type: 'integer' },
       ];
 
       const { container } = render(
@@ -599,10 +605,298 @@ describe('AyuNestedRenderer', () => {
         />
       );
 
-      const pill = screen.getByTestId('selectable-int-1');
-      await user.click(pill);
+      // Non-choice items render as pills
+      expect(screen.getByTestId('selectable-int-1')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-int-2')).toBeInTheDocument();
 
-      expect(container.querySelector('svg')).not.toBeInTheDocument();
+      // Click pill to reveal input and triangle SVG
+      await user.click(screen.getByTestId('selectable-int-1'));
+      const svgs = container.querySelectorAll('svg');
+      expect(svgs.length).toBeGreaterThanOrEqual(1);
+      expect(svgs[0]).toHaveAttribute('fill', '#20c997');
+    });
+
+    it('should render all-string children as selectable pills (Systolic/Diastolic scenario)', async () => {
+      const user = userEvent.setup();
+      const items: AyuQuestion[] = [
+        { linkId: 'systolic', text: 'Systolic', type: 'string' },
+        { linkId: 'diastolic', text: 'Diastolic', type: 'string' },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // Both children render as selectable pills
+      expect(screen.getByTestId('selectable-systolic')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-diastolic')).toBeInTheDocument();
+
+      // Click pill to reveal its input
+      await user.click(screen.getByTestId('selectable-systolic'));
+      expect(screen.getByTestId('renderer-systolic')).toBeInTheDocument();
+    });
+
+    it('should render all-integer children as pills and preserve values when switching (BP values)', async () => {
+      const user = userEvent.setup();
+      const items: AyuQuestion[] = [
+        { linkId: 'systolic', text: 'Enter systolic BP', type: 'integer' },
+        { linkId: 'diastolic', text: 'Enter diastolic BP', type: 'integer' },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          clearAnswers={mockClearAnswers}
+          selectable
+        />
+      );
+
+      // Both render as selectable pills
+      expect(screen.getByTestId('selectable-systolic')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-diastolic')).toBeInTheDocument();
+
+      // Click systolic pill → input appears
+      await user.click(screen.getByTestId('selectable-systolic'));
+      fireEvent.change(screen.getByTestId('input-systolic'), {
+        target: { value: '120' },
+      });
+      expect(mockSetAnswer).toHaveBeenCalledWith(items[0], '120');
+
+      // Switch to diastolic pill → no clearAnswers called (values preserved)
+      mockClearAnswers.mockClear();
+      await user.click(screen.getByTestId('selectable-diastolic'));
+      expect(mockClearAnswers).not.toHaveBeenCalled();
+
+      fireEvent.change(screen.getByTestId('input-diastolic'), {
+        target: { value: '80' },
+      });
+      expect(mockSetAnswer).toHaveBeenCalledWith(items[1], '80');
+    });
+
+    it('should flatten container items and show their children directly as pills', async () => {
+      const user = userEvent.setup();
+      const items: AyuQuestion[] = [
+        { linkId: 'normal', text: 'Normal', type: 'choice' },
+        {
+          linkId: 'take-bp',
+          text: 'Take the patient\'s BP lying down',
+          type: 'string',
+          // Container: has sub-children but no answerOption
+          item: [
+            { linkId: 'systolic', text: 'Enter systolic BP', type: 'string' },
+            { linkId: 'diastolic', text: 'Enter diastolic BP', type: 'string' },
+          ],
+        },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // "Take BP" container should NOT appear as a pill
+      expect(screen.queryByTestId('selectable-take-bp')).not.toBeInTheDocument();
+      // Its children should appear directly as pills
+      expect(screen.getByTestId('selectable-systolic')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-diastolic')).toBeInTheDocument();
+      // "Normal" choice sibling should still be a pill
+      expect(screen.getByTestId('selectable-normal')).toBeInTheDocument();
+
+      // Click systolic pill to reveal its input
+      await user.click(screen.getByTestId('selectable-systolic'));
+      expect(screen.getByTestId('renderer-systolic')).toBeInTheDocument();
+    });
+
+    it('should not flatten items that have answerOption mapping', () => {
+      const items: AyuQuestion[] = [
+        {
+          linkId: 'branching',
+          text: 'Branching Choice',
+          type: 'choice',
+          answerOption: [
+            { valueCoding: { code: 'opt-a', display: 'Option A' } },
+          ],
+          item: [
+            { linkId: 'nested-child', text: 'Nested', type: 'string' },
+          ],
+        },
+        { linkId: 'sibling', text: 'Sibling', type: 'choice' },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // Branching item should remain as a pill (not flattened)
+      expect(screen.getByTestId('selectable-branching')).toBeInTheDocument();
+      // Its child should NOT appear directly
+      expect(screen.queryByTestId('selectable-nested-child')).not.toBeInTheDocument();
+    });
+
+    it('should flatten non-choice container even when it has answerOption', async () => {
+      const user = userEvent.setup();
+      const items: AyuQuestion[] = [
+        { linkId: 'normal', text: 'Normal', type: 'choice' },
+        {
+          linkId: 'take-bp',
+          text: 'Take the patient\'s BP lying down',
+          type: 'string',
+          /* Non-choice type with answerOption — still a container, not a
+             branching choice. Should be flattened. */
+          answerOption: [
+            { valueCoding: { code: 'systolic', display: 'Systolic' } },
+            { valueCoding: { code: 'diastolic', display: 'Diastolic' } },
+          ],
+          item: [
+            { linkId: 'systolic', text: 'Enter systolic BP', type: 'integer' },
+            { linkId: 'diastolic', text: 'Enter diastolic BP', type: 'integer' },
+          ],
+        },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // Container should NOT appear as a pill
+      expect(screen.queryByTestId('selectable-take-bp')).not.toBeInTheDocument();
+      // Its children should appear directly as pills
+      expect(screen.getByTestId('selectable-systolic')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-diastolic')).toBeInTheDocument();
+
+      // Click systolic pill to reveal its input
+      await user.click(screen.getByTestId('selectable-systolic'));
+      expect(screen.getByTestId('renderer-systolic')).toBeInTheDocument();
+    });
+
+    it('should strip enableWhen referencing flattened parent from children', () => {
+      const items: AyuQuestion[] = [
+        { linkId: 'other', text: 'Other', type: 'choice' },
+        {
+          linkId: 'container',
+          text: 'Container',
+          type: 'group',
+          item: [
+            {
+              linkId: 'gated-child',
+              text: 'Gated Child',
+              type: 'integer',
+              enableWhen: [
+                { question: 'container', operator: '=', answerString: 'yes' },
+              ],
+            },
+            { linkId: 'free-child', text: 'Free Child', type: 'integer' },
+          ],
+        },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // Container should be flattened
+      expect(screen.queryByTestId('selectable-container')).not.toBeInTheDocument();
+      // Child with enableWhen stripped should be visible
+      expect(screen.getByTestId('selectable-gated-child')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-free-child')).toBeInTheDocument();
+    });
+
+    it('should remove enableWhen entirely when all entries reference flattened parent', () => {
+      const items: AyuQuestion[] = [
+        { linkId: 'other', text: 'Other', type: 'choice' },
+        {
+          linkId: 'container',
+          text: 'Container',
+          type: 'group',
+          item: [
+            {
+              linkId: 'fully-gated',
+              text: 'Fully Gated',
+              type: 'integer',
+              enableWhen: [
+                { question: 'container', operator: '=', answerString: 'yes' },
+                { question: 'container', operator: '=', answerString: 'no' },
+              ],
+            },
+          ],
+        },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      /* All enableWhen entries referenced the flattened container, so they are
+         all removed — child should be visible (enableWhen becomes undefined) */
+      expect(screen.getByTestId('selectable-fully-gated')).toBeInTheDocument();
+    });
+
+    it('should keep non-container enableWhen entries when only some reference the flattened parent', () => {
+      const items: AyuQuestion[] = [
+        { linkId: 'other', text: 'Other', type: 'choice' },
+        {
+          linkId: 'container',
+          text: 'Container',
+          type: 'group',
+          item: [
+            {
+              linkId: 'partial-gated',
+              text: 'Partial Gated',
+              type: 'integer',
+              enableWhen: [
+                // This one references the container → stripped
+                { question: 'container', operator: '=', answerString: 'yes' },
+                // This one references an external question → kept
+                { question: 'external-q', operator: '=', answerString: 'x' },
+              ],
+            },
+          ],
+        },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      /* The container entry is stripped but the external-q entry survives,
+         so the child keeps its (filtered) enableWhen and renders as a pill. */
+      expect(screen.getByTestId('selectable-partial-gated')).toBeInTheDocument();
     });
   });
 
@@ -926,6 +1220,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -970,6 +1265,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1007,6 +1303,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1025,18 +1322,19 @@ describe('AyuNestedRenderer', () => {
       expect(screen.queryByTestId('renderer-opt-a-nested')).not.toBeInTheDocument();
     });
 
-    it('should render regular recursive nested renderer when child has items but no answerOption mapping', async () => {
+    it('should flatten container item (no answerOption) and show its children directly as pills', async () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         {
           linkId: 'choice-1',
           text: 'Choice Item',
           type: 'choice',
-          // has item but no answerOption
+          // has item but no answerOption → gets flattened
           item: [
             { linkId: 'nested-1', text: 'Nested', type: 'string' },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1048,10 +1346,11 @@ describe('AyuNestedRenderer', () => {
         />
       );
 
-      const pill = screen.getByTestId('selectable-choice-1');
-      await user.click(pill);
+      // choice-1 is flattened — nested-1 appears directly as a pill
+      expect(screen.queryByTestId('selectable-choice-1')).not.toBeInTheDocument();
+      expect(screen.getByTestId('selectable-nested-1')).toBeInTheDocument();
 
-      // Should render via recursive AyuNestedRenderer, not inline
+      await user.click(screen.getByTestId('selectable-nested-1'));
       expect(screen.getByTestId('renderer-nested-1')).toBeInTheDocument();
     });
 
@@ -1073,6 +1372,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1108,6 +1408,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1223,10 +1524,12 @@ describe('AyuNestedRenderer', () => {
       expect(mockSetAnswer).toHaveBeenCalledWith(items[0], 'typed value');
     });
 
-    it('should call setAnswer for selected non-string children in selectable mode', async () => {
+    it('should call setAnswer for string-type child after selecting its pill', async () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
-        { linkId: 'int-1', text: 'Int Item', type: 'integer' },
+        { linkId: 'choice-a', text: 'Choice A', type: 'choice' },
+        { linkId: 'choice-b', text: 'Choice B', type: 'choice' },
+        { linkId: 'describe', text: 'Describe', type: 'string' },
       ];
 
       render(
@@ -1238,9 +1541,33 @@ describe('AyuNestedRenderer', () => {
         />
       );
 
-      // Select the item first
-      await user.click(screen.getByTestId('selectable-int-1'));
+      // String child is now rendered as a pill — click it to reveal the input
+      await user.click(screen.getByTestId('selectable-describe'));
 
+      const input = screen.getByTestId('input-describe');
+      fireEvent.change(input, { target: { value: 'some text' } });
+
+      expect(mockSetAnswer).toHaveBeenCalledWith(items[2], 'some text');
+    });
+
+    it('should call setAnswer for non-choice children after selecting pill in selectable mode', async () => {
+      const user = userEvent.setup();
+      const items: AyuQuestion[] = [
+        { linkId: 'int-1', text: 'Int Item', type: 'integer' },
+        { linkId: 'int-2', text: 'Int Item 2', type: 'integer' },
+      ];
+
+      render(
+        <AyuNestedRenderer
+          items={items}
+          answers={{}}
+          setAnswer={mockSetAnswer}
+          selectable
+        />
+      );
+
+      // Click pill to reveal input
+      await user.click(screen.getByTestId('selectable-int-1'));
       const input = screen.getByTestId('input-int-1');
       fireEvent.change(input, { target: { value: '42' } });
 
@@ -1359,6 +1686,7 @@ describe('AyuNestedRenderer', () => {
     it('should have option-group class in selectable mode', () => {
       const items: AyuQuestion[] = [
         { linkId: 'child-1', text: 'Question', type: 'choice' },
+        { linkId: 'child-2', text: 'Question 2', type: 'choice' },
       ];
 
       const { container } = render(
@@ -1394,6 +1722,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1437,6 +1766,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1464,6 +1794,9 @@ describe('AyuNestedRenderer', () => {
           linkId: 'option-a',
           text: 'Option A',
           type: 'choice',
+          answerOption: [
+            { valueCoding: { code: 'sub-opt', display: 'Sub Option' } },
+          ],
           item: [
             { linkId: 'a-child', text: 'A Child', type: 'string' },
           ],
@@ -1502,10 +1835,14 @@ describe('AyuNestedRenderer', () => {
           linkId: 'option-a',
           text: 'Option A',
           type: 'choice',
+          answerOption: [
+            { valueCoding: { code: 'sub-opt', display: 'Sub Option' } },
+          ],
           item: [
             { linkId: 'a-child', text: 'A Child', type: 'string' },
           ],
         },
+        { linkId: 'option-c', text: 'Option C', type: 'choice' },
       ];
 
       render(
@@ -1531,6 +1868,7 @@ describe('AyuNestedRenderer', () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         { linkId: 'option-a', text: 'Option A', type: 'choice' },
+        { linkId: 'option-b', text: 'Option B', type: 'choice' },
       ];
 
       render(
@@ -1623,6 +1961,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'choice-sibling', text: 'Sibling', type: 'choice' },
       ];
 
       render(
@@ -1671,18 +2010,19 @@ describe('AyuNestedRenderer', () => {
       );
 
       expect(screen.getByTestId('renderer-level-1')).toBeInTheDocument();
-      // level-2 is rendered via recursive AyuNestedRenderer (selectable=true)
-      // In selectable mode, string-type items render directly
+      /* level-2 is rendered via recursive AyuNestedRenderer (selectable=true)
+         In selectable mode, string-type items render directly */
       expect(screen.getByTestId('renderer-level-2')).toBeInTheDocument();
     });
 
-    it('should render deeply nested items via selectable mode choice expansion', async () => {
+    it('should flatten container items in selectable mode and show nested children directly', async () => {
       const user = userEvent.setup();
       const items: AyuQuestion[] = [
         {
           linkId: 'level-1',
           text: 'Level 1',
           type: 'choice',
+          // No answerOption → container gets flattened
           item: [
             {
               linkId: 'level-2',
@@ -1691,6 +2031,7 @@ describe('AyuNestedRenderer', () => {
             },
           ],
         },
+        { linkId: 'level-1b', text: 'Level 1b', type: 'choice' },
       ];
 
       render(
@@ -1702,11 +2043,13 @@ describe('AyuNestedRenderer', () => {
         />
       );
 
-      // Click to select the choice item
-      await user.click(screen.getByTestId('selectable-level-1'));
+      // level-1 is flattened — its child level-2 appears directly as a pill
+      expect(screen.queryByTestId('selectable-level-1')).not.toBeInTheDocument();
+      expect(screen.getByTestId('selectable-level-2')).toBeInTheDocument();
+      expect(screen.getByTestId('selectable-level-1b')).toBeInTheDocument();
 
-      expect(screen.getByTestId('renderer-level-1')).toBeInTheDocument();
-      // level-2 is rendered via recursive AyuNestedRenderer in selectable mode
+      // Click level-2 pill to select it
+      await user.click(screen.getByTestId('selectable-level-2'));
       expect(screen.getByTestId('renderer-level-2')).toBeInTheDocument();
     });
   });

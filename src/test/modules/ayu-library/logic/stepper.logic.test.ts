@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AyuQuestion } from '../../../../modules/ayu-library/types/ayu.types';
+import { EXT_URL_PE_SECTION_KEY } from '../../../../modules/ayu-library/utils/constants';
 import {
   isDurationAnswer,
   isMutuallyExclusiveOption,
@@ -597,6 +598,157 @@ describe('isTopLevelComplete', () => {
       // codes.length (1) < totalOptions (0) is false, so the guard doesn't return false
       // The question is complete because the array is non-empty and no further nested checks apply
       expect(isTopLevelComplete(q, { as1: ['fever'] })).toBe(true);
+    });
+  });
+
+  describe('Physical Exam branching questions (PE skip)', () => {
+    const makePEQuestion = (items?: AyuQuestion[]): AyuQuestion => ({
+      linkId: 'pe-lumps',
+      type: 'choice',
+      text: 'Lumps',
+      extension: [
+        { url: EXT_URL_PE_SECTION_KEY, valueString: 'Abdomen' },
+      ],
+      answerOption: [
+        { valueCoding: { code: 'yes', display: 'Yes' } },
+        { valueCoding: { code: 'no', display: 'No' } },
+      ],
+      item: items,
+    });
+
+    it('should return true for PE question with unanswered nested children', () => {
+      const q = makePEQuestion([
+        { linkId: 'pe-lumps.where', type: 'choice' },
+        { linkId: 'pe-lumps.howmany', type: 'integer' },
+        { linkId: 'pe-lumps.shape', type: 'string' },
+      ]);
+      // Parent answered, but none of the sub-questions are answered
+      expect(isTopLevelComplete(q, { 'pe-lumps': 'yes' })).toBe(true);
+    });
+
+    it('should still require the parent PE answer', () => {
+      const q = makePEQuestion([
+        { linkId: 'pe-lumps.where', type: 'choice' },
+      ]);
+      // No parent answer
+      expect(isTopLevelComplete(q, {})).toBe(false);
+    });
+
+    it('should return true for PE question with no nested items', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe-simple',
+        type: 'choice',
+        extension: [
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'General' },
+        ],
+        answerOption: [
+          { valueCoding: { code: 'yes', display: 'Yes' } },
+          { valueCoding: { code: 'no', display: 'No' } },
+        ],
+      };
+      expect(isTopLevelComplete(q, { 'pe-simple': 'yes' })).toBe(true);
+    });
+
+    it('should return true for PE question with deeply nested unanswered children', () => {
+      const q = makePEQuestion([
+        {
+          linkId: 'pe-lumps.where',
+          type: 'choice',
+          item: [
+            { linkId: 'pe-lumps.where.detail', type: 'string' },
+          ],
+        },
+      ]);
+      // Parent answered, deeply nested string unanswered
+      expect(isTopLevelComplete(q, { 'pe-lumps': 'yes' })).toBe(true);
+    });
+
+    it('should return false for PE question when a gated choice child is visible and unanswered', () => {
+      const q = makePEQuestion([
+        {
+          linkId: 'pe-lumps.location',
+          type: 'choice',
+          enableWhen: [
+            { question: 'pe-lumps', operator: '=', answerCoding: { code: 'yes' } },
+          ],
+        },
+      ]);
+      // "Yes" selected → gated location child becomes visible → not complete
+      expect(isTopLevelComplete(q, { 'pe-lumps': 'yes' })).toBe(false);
+    });
+
+    it('should return true for PE question when a gated choice child is visible and answered', () => {
+      const q = makePEQuestion([
+        {
+          linkId: 'pe-lumps.location',
+          type: 'choice',
+          enableWhen: [
+            { question: 'pe-lumps', operator: '=', answerCoding: { code: 'yes' } },
+          ],
+        },
+      ]);
+      // "Yes" selected AND location answered → complete
+      expect(
+        isTopLevelComplete(q, { 'pe-lumps': 'yes', 'pe-lumps.location': 'upper-l' })
+      ).toBe(true);
+    });
+
+    it('should return true for PE question when a gated child is not visible', () => {
+      const q = makePEQuestion([
+        {
+          linkId: 'pe-lumps.location',
+          type: 'choice',
+          enableWhen: [
+            { question: 'pe-lumps', operator: '=', answerCoding: { code: 'yes' } },
+          ],
+        },
+      ]);
+      // "No" selected → gated child is hidden → complete
+      expect(isTopLevelComplete(q, { 'pe-lumps': 'no' })).toBe(true);
+    });
+
+    it('should NOT skip nested validation for non-PE questions with children', () => {
+      // Same shape but no PE extension → standard behavior
+      const q: AyuQuestion = {
+        linkId: 'q-normal',
+        type: 'choice',
+        text: 'Normal question',
+        item: [
+          { linkId: 'q-normal.child', type: 'string' },
+        ],
+      };
+      // Non-PE question with unanswered child → incomplete
+      expect(isTopLevelComplete(q, { 'q-normal': 'yes' })).toBe(false);
+    });
+
+    it('should still check duration validity for PE questions', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe-dur',
+        type: 'choice',
+        extension: [
+          { url: EXT_URL_PE_SECTION_KEY, valueString: 'General' },
+        ],
+        item: [
+          { linkId: 'pe-dur.child', type: 'choice' },
+        ],
+      };
+      // Duration check runs before the PE skip — incomplete duration means false
+      expect(
+        isTopLevelComplete(q, {
+          'pe-dur': 'yes',
+          'pe-dur.child': { dropdownValues: { number: 5 } },
+        })
+      ).toBe(false);
+    });
+
+    it('should return true for repeats PE question with array answer', () => {
+      const q: AyuQuestion = {
+        ...makePEQuestion([
+          { linkId: 'pe-lumps.child', type: 'string' },
+        ]),
+        repeats: true,
+      };
+      expect(isTopLevelComplete(q, { 'pe-lumps': ['yes'] })).toBe(true);
     });
   });
 });

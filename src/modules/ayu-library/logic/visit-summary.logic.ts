@@ -11,6 +11,7 @@ import {
   isStrictAssociatedSymptoms,
   resolveAyuComponent,
 } from './decision-matrix';
+import { evaluateEnableWhen } from './enable-when.logic';
 import { isMutuallyExclusiveOption } from './stepper.logic';
 
 const LABEL_PLACEHOLDER_RE = /\[[^\]]*\]/;
@@ -97,6 +98,7 @@ function buildSummaryForItems(
   const mainItems: SummaryItem[] = [];
   const associatedItems: SummaryItem[] = [];
   const processed = new Set<string>();
+  const answersObj = Object.fromEntries(answersMap);
 
   function getExtensionLabel(item: AyuQuestion): string {
     return item.text || '';
@@ -169,12 +171,15 @@ function buildSummaryForItems(
     }
   }
 
-  /** Recursively collect display values from all descendants of a question. */
+  /** Recursively collect display values from all descendants of a question.
+   *  Skips gated children whose `enableWhen` condition is not met so that
+   *  stale answers from hidden branches do not appear in the summary. */
   function collectDescendantValues(items: AyuQuestion[] | undefined): string[] {
     if (!items) return [];
     const values: string[] = [];
     for (const child of items) {
       if (processed.has(child.linkId)) continue;
+      if (!evaluateEnableWhen(child.enableWhen, answersObj)) continue;
       values.push(...collectNestedOwnValues(child));
       processed.add(child.linkId);
       values.push(...collectDescendantValues(child.item));

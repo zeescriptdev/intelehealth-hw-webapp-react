@@ -158,8 +158,9 @@ export function extractJson(text) {
 /**
  * Rank candidate models best-first: structured-output support, then context.
  *
- * The whole pipeline depends on the reply parsing as strict JSON, and most free
- * models cannot guarantee that. Ranking on context alone puts a large-context
+ * Structured output first, then non-reasoning, then context. The pipeline needs
+ * strict JSON in a bounded reply; a reasoning model can spend the whole output
+ * budget thinking and return a truncated fragment. Ranking on context alone puts a large-context
  * model that rambles ahead of a smaller one that answers in the required shape,
  * and the rambling one then wins the chain and returns nothing usable.
  *
@@ -168,7 +169,9 @@ export function extractJson(text) {
 export function rankModels(models) {
   return [...models].sort(
     (a, b) =>
-      Number(b.structured) - Number(a.structured) || b.context - a.context
+      Number(b.structured) - Number(a.structured) ||
+      Number(a.reasoning) - Number(b.reasoning) ||
+      b.context - a.context
   );
 }
 
@@ -198,6 +201,10 @@ export async function listModels(apiKey) {
         structured: (m.supported_parameters || []).includes(
           'structured_outputs'
         ),
+        // Reasoning models spend the output budget thinking before replying, so
+        // they need far more headroom for the same answer. Rank them below an
+        // equally capable non-reasoning model rather than excluding them.
+        reasoning: (m.supported_parameters || []).includes('reasoning'),
         free:
           m.id.endsWith(':free') ||
           (Number(m.pricing?.prompt) === 0 &&

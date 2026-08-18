@@ -8,7 +8,12 @@ type ModalItem = {
 };
 
 export type ModalSectionItem =
-  | { type: 'labelValue'; label: string; value: string | number | null }
+  | {
+      type: 'labelValue';
+      label: string;
+      value: string | number | null;
+      isChild?: boolean;
+    }
   | { type: 'subheading'; heading: string; values: string[] };
 
 export type ModalSection = {

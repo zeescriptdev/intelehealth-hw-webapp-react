@@ -4,14 +4,26 @@ import { OBS_CONCEPTS } from '../types/obs.types';
 
 const OBS_ENDPOINT = '/obs';
 
-let pendingImages: Array<{ file: File; comment: string }> = [];
+let pendingImages: Array<{
+  file: File;
+  comment: string;
+  questionId?: string;
+}> = [];
 
-export const addPendingImage = (file: File, comment: string) => {
-  pendingImages.push({ file, comment });
+export const addPendingImage = (
+  file: File,
+  comment: string,
+  questionId?: string
+) => {
+  pendingImages.push({ file, comment, questionId });
 };
 
 export const removePendingImage = (index: number) => {
   pendingImages.splice(index, 1);
+};
+
+export const removePendingImagesByQuestionId = (questionId: string) => {
+  pendingImages = pendingImages.filter(img => img.questionId !== questionId);
 };
 
 export const clearPendingImages = () => {

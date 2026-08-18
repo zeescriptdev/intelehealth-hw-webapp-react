@@ -13,6 +13,7 @@ const hookReturn = {
   addCameraImage: vi.fn(),
   removeCameraImage: vi.fn(),
   clearCameraImages: vi.fn(),
+  commitQuestionImages: vi.fn(),
 };
 
 vi.mock(

@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AyuQuestion } from '../../../../modules/ayu-library/types/ayu.types';
 // Mock decision-matrix and associated-symptoms — only used by validateQuestion
 vi.mock('../../../../modules/ayu-library/logic/decision-matrix', () => ({
   ASSOCIATED_SYMPTOMS_COMPONENT: 'associatedSymptoms',
   resolveAyuComponent: vi.fn(() => 'select'),
   isStrictAssociatedSymptoms: vi.fn(() => false),
+  isPhysicalExamOptionsQuestion: vi.fn(() => false),
 }));
 
 vi.mock(
@@ -28,6 +29,7 @@ import {
 import {
   resolveAyuComponent,
   isStrictAssociatedSymptoms,
+  isPhysicalExamOptionsQuestion,
 } from '../../../../modules/ayu-library/logic/decision-matrix';
 import { hasExclusiveSelected } from '../../../../modules/ayu-library/logic/associated-symptoms.logic';
 
@@ -785,6 +787,39 @@ describe('validateQuestion', () => {
     });
   });
 
+  it('should return uploadCapturedImage when images captured but not uploaded', () => {
+    const q: AyuQuestion = { linkId: 'q1', type: 'choice' };
+    const cameraCheck = vi.fn(() => false);
+    const notUploadedCheck = vi.fn(() => true);
+    expect(
+      validateQuestion(q, { q1: 'answer' }, cameraCheck, notUploadedCheck)
+    ).toEqual({
+      valid: false,
+      reason: 'uploadCapturedImage',
+    });
+  });
+
+  it('should prioritize uploadCapturedImage over uploadImage when both fire', () => {
+    const q: AyuQuestion = { linkId: 'q1', type: 'choice' };
+    const cameraCheck = vi.fn(() => true);
+    const notUploadedCheck = vi.fn(() => true);
+    expect(
+      validateQuestion(q, { q1: 'answer' }, cameraCheck, notUploadedCheck)
+    ).toEqual({
+      valid: false,
+      reason: 'uploadCapturedImage',
+    });
+  });
+
+  it('should not flag uploadCapturedImage when check returns false', () => {
+    const q: AyuQuestion = { linkId: 'q1', type: 'choice' };
+    const cameraCheck = vi.fn(() => false);
+    const notUploadedCheck = vi.fn(() => false);
+    expect(
+      validateQuestion(q, { q1: 'answer' }, cameraCheck, notUploadedCheck)
+    ).toEqual({ valid: true });
+  });
+
   it('should return enterValue when nested string child is unanswered', () => {
     const q: AyuQuestion = {
       linkId: 'q1',
@@ -962,6 +997,125 @@ describe('validateQuestion', () => {
     expect(validateQuestion(q, {})).toEqual({
       valid: false,
       reason: 'selectOption',
+    });
+  });
+
+  describe('Physical Exam question validation skip', () => {
+    beforeEach(() => {
+      vi.mocked(isPhysicalExamOptionsQuestion).mockReturnValue(true);
+    });
+
+    afterEach(() => {
+      vi.mocked(isPhysicalExamOptionsQuestion).mockReturnValue(false);
+    });
+
+    it('should return valid for PE question with unanswered nested string child', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'string' }],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should return valid for PE question with unanswered nested integer child', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'integer' }],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should return valid for PE question with unanswered nested required child', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'string', required: true }],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should return valid for PE question with unanswered nested date child', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'date' }],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should return valid for PE question with unanswered nested quantity child', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'quantity' }],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should still check quantity validity at top level for PE questions', () => {
+      const q: AyuQuestion = { linkId: 'pe1', type: 'quantity' };
+      vi.mocked(isPhysicalExamOptionsQuestion).mockReturnValue(true);
+      expect(validateQuestion(q, {})).toEqual({
+        valid: false,
+        reason: 'enterValue',
+      });
+    });
+
+    it('should still check camera missing images for PE questions', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [{ linkId: 'pe1.1', type: 'string' }],
+      };
+      const cameraCheck = vi.fn(() => true);
+      expect(validateQuestion(q, { pe1: 'yes' }, cameraCheck)).toEqual({
+        valid: false,
+        reason: 'uploadImage',
+      });
+    });
+
+    it('should return valid for PE question with deeply nested unanswered children', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        item: [
+          {
+            linkId: 'pe1.1',
+            type: 'choice',
+            item: [{ linkId: 'pe1.1.1', type: 'string' }],
+          },
+        ],
+      };
+      expect(validateQuestion(q, { pe1: 'yes' })).toEqual({ valid: true });
+    });
+
+    it('should still flag invalid repeats for PE questions with no answer', () => {
+      const q: AyuQuestion = {
+        linkId: 'pe1',
+        type: 'choice',
+        repeats: true,
+      };
+      expect(validateQuestion(q, {})).toEqual({
+        valid: false,
+        reason: 'selectOption',
+      });
+    });
+  });
+
+  describe('non-PE question validation (isPE=false)', () => {
+    it('should still return enterValue for non-PE with unanswered nested string', () => {
+      vi.mocked(isPhysicalExamOptionsQuestion).mockReturnValue(false);
+      const q: AyuQuestion = {
+        linkId: 'q1',
+        type: 'choice',
+        item: [{ linkId: 'q1.1', type: 'string' }],
+      };
+      expect(validateQuestion(q, { q1: 'yes' })).toEqual({
+        valid: false,
+        reason: 'enterValue',
+      });
     });
   });
 });

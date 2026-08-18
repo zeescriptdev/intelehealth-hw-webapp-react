@@ -6,6 +6,7 @@ interface SelectableOptionProps {
   label: string | undefined;
   value: string | undefined;
   selected: boolean;
+  disabled?: boolean;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
   onClick?: () => void;
@@ -16,12 +17,17 @@ export const AyuSelectableOption: React.FC<SelectableOptionProps> = ({
   leftIcon,
   rightIcon,
   selected,
+  disabled,
   onClick,
 }) => {
   return (
     <button
       type="button"
-      className={`selectable-option ${selected ? 'selected' : ''}`}
+      className={cn(
+        'selectable-option',
+        selected && 'selected',
+        disabled && 'disabled'
+      )}
       onClick={onClick}
     >
       {leftIcon && (

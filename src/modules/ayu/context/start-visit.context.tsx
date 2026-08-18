@@ -88,6 +88,11 @@ interface StartVisitContextType {
   ) => void;
   saveSectionToTemp: (sectionData: Partial<TempVisitData>) => Promise<void>;
   clearVisitId: () => void;
+  /** In-memory snapshot of PE pending image files — survives module reloading. */
+  physExamPendingImages: Array<{ file: File; comment: string }>;
+  setPhysExamPendingImages: (
+    images: Array<{ file: File; comment: string }>
+  ) => void;
 }
 
 const StartVisitContext = createContext<StartVisitContextType | null>(null);
@@ -119,6 +124,9 @@ export const StartVisitProvider = ({
     medicalHistory: null,
     medicalHistoryAnswers: null,
   });
+  const [physExamPendingImages, setPhysExamPendingImages] = useState<
+    Array<{ file: File; comment: string }>
+  >([]);
 
   const dataRef = useRef(data);
   dataRef.current = data;
@@ -292,6 +300,8 @@ export const StartVisitProvider = ({
         setMedicalHistoryAnswers,
         saveSectionToTemp,
         clearVisitId,
+        physExamPendingImages,
+        setPhysExamPendingImages,
       }}
     >
       {children}

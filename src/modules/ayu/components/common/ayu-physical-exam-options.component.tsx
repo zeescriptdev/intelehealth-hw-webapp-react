@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import iconCamera from '../../../../assets/icons/icon-camera.svg';
 import {
   computeMultiSelectToggle,
+  isMutuallyExclusiveOption,
   SELECT_ANY_ONE,
   SELECT_ONE_OR_MORE,
 } from '../../../ayu-library';
@@ -53,16 +54,11 @@ export const AyuPhysicalExamOptions = ({
 }: AyuRendererBaseProps) => {
   const camera = usePhysicalExamCamera();
   const [cameraLocallySelected, setCameraLocallySelected] = useState(false);
-  /* Yes/No chosen while the camera tile is active, not yet committed. Held
-   * locally so picking it doesn't auto-advance before the picture is captured;
-   * flushed into the answer (alongside the camera code) on Upload. */
   const [pendingRegular, setPendingRegular] = useState<string | null>(null);
   const [submittedAt, setSubmittedAt] = useState<number | null>(null);
   const [showUploadError, setShowUploadError] = useState(false);
 
-  if (!question) return null;
-
-  const allOptions = question.answerOption ?? [];
+  const allOptions = question?.answerOption ?? [];
   const cameraOption = allOptions.find(o =>
     o.extension?.some(
       ext =>
@@ -72,29 +68,57 @@ export const AyuPhysicalExamOptions = ({
   );
   const cameraCode = cameraOption?.valueCoding?.code;
   const regularOptions = allOptions.filter(o => o !== cameraOption);
-  const isMultiChoice = !!question.repeats;
+  const isSingleOption = regularOptions.length === 1;
+  const isMultiChoice = !!question?.repeats;
+
+  /*
+   * Auto-select when only one non-camera regular option exists so child
+   * questions (e.g. Systolic / Diastolic) appear immediately without the user
+   * having to click the single option tile first.
+   */
+  const singleOptionCode = isSingleOption
+    ? (regularOptions[0]?.valueCoding?.code ?? regularOptions[0]?.valueString)
+    : undefined;
+
+  useEffect(() => {
+    if (singleOptionCode && !value && question) {
+      setAnswer?.(question, singleOptionCode);
+    }
+    /* Run only on mount; singleOptionCode and question are structurally stable. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!question) return null;
   const selected: string[] = Array.isArray(value)
     ? value
     : typeof value === 'string'
       ? [value]
       : [];
 
-  /* The camera tile is "selected" either while the user is actively capturing
-   * this session (cameraLocallySelected) OR when a picture was already
-   * committed to the answer (e.g. on edit / revisit) — so it pre-selects. */
   const cameraCommitted = !!cameraCode && selected.includes(cameraCode);
   const isCameraSelected = cameraLocallySelected || cameraCommitted;
 
-  /* Non-camera (Yes/No) codes currently committed in the answer. */
   const committedRegular = selected.filter(id => id !== cameraCode);
 
-  /* Yes/No selection to render. While the camera tile is in use we surface the
-   * uncommitted local choice (pendingRegular) so the tile selection and the
-   * Yes/No selection can be made together before a single Upload commit. */
   const regularSelected: string[] =
     !isMultiChoice && pendingRegular !== null
       ? [pendingRegular]
       : committedRegular;
+
+  const hasExclusiveSelected =
+    isMultiChoice &&
+    regularSelected.some(code => isMutuallyExclusiveOption(question, code));
+  const hasNonExclusiveSelected =
+    isMultiChoice &&
+    regularSelected.some(code => !isMutuallyExclusiveOption(question, code));
+
+  const isOptionDisabled = (optionCode: string): boolean => {
+    if (!isMultiChoice) return false;
+    const isExcl = isMutuallyExclusiveOption(question, optionCode);
+    if (hasExclusiveSelected && !isExcl) return true;
+    if (hasNonExclusiveSelected && isExcl) return true;
+    return false;
+  };
 
   const categoryLabel = question.extension?.find(
     e => e.url === EXT_URL_PE_CATEGORY_LABEL
@@ -113,16 +137,9 @@ export const AyuPhysicalExamOptions = ({
 
   const handleRegularOptionClick = (optionId: string) => {
     if (isMultiChoice) {
-      /* Toggle through the shared logic so mutually-exclusive options
-      (e.g. "None"/"Normal", marked exclude-from-multi-choice) clear the
-      rest and vice-versa. The camera code is never exclusive, so it is
-      preserved when a normal option is toggled.*/
       const next = computeMultiSelectToggle(question, selected, optionId);
       setAnswer?.(question, next);
     } else if (isCameraSelected) {
-      // Camera is in play: hold the Yes/No locally (toggle off on re-click) and
-      // commit it together with the picture on Upload, so selecting Yes/No here
-      // doesn't drop the picture or trigger the stepper's auto-advance.
       setPendingRegular(prev => (prev === optionId ? null : optionId));
     } else {
       setAnswer?.(question, optionId);
@@ -130,12 +147,7 @@ export const AyuPhysicalExamOptions = ({
   };
 
   const handleCameraTileClick = () => {
-    /* The tile is rendered only when both cameraOption and cameraCode are
-     * present, so this handler always runs with cameraCode set. */
     if (isCameraSelected) {
-      // Deselecting — drop any in-progress images and the pending Yes/No, clear
-      // local state, and strip only the camera code from a committed answer
-      // (edit case), keeping any committed Yes/No selection intact.
       camera?.clearCameraImages(question.linkId);
       setCameraLocallySelected(false);
       setPendingRegular(null);
@@ -158,9 +170,6 @@ export const AyuPhysicalExamOptions = ({
       return;
     }
     setShowUploadError(false);
-    // Commit the Yes/No selection (committed or the pending local choice)
-    // together with the camera code, so a captured picture composes with the
-    // finding instead of replacing it.
     const next = [
       ...regularSelected.filter(id => id !== cameraCode),
       cameraCode!,
@@ -168,15 +177,9 @@ export const AyuPhysicalExamOptions = ({
     setAnswer?.(question, next);
     setPendingRegular(null);
     setSubmittedAt(Date.now());
+    camera?.commitQuestionImages(question.linkId);
   };
 
-  /* Only the camera-commit case needs an in-component Submit, since a captured
-   * image must be explicitly turned into an answer. Plain multi-choice defers
-   * to the outer stepper container's Submit (which also validates required
-   * fields and advances via goNext) — otherwise two Submit buttons stack.
-   * We show the button whenever the camera tile is selected — either being
-   * captured this session OR already committed (edit), so on edit the user can
-   * review the uploaded pictures, add/remove, and re-submit. */
   const submitVisible = isCameraSelected && cameraImages.length > 0;
 
   const submitJustHappened = !!submittedAt && Date.now() - submittedAt < 1500;
@@ -220,39 +223,54 @@ export const AyuPhysicalExamOptions = ({
         </div>
       )}
       <hr className="border-gray-200" />
-      <p className="pt-2 text-xs text-gray-500">
-        {isMultiChoice ? SELECT_ONE_OR_MORE : SELECT_ANY_ONE}
-      </p>
-      <div className="flex flex-wrap gap-3 pt-2 pb-3">
-        {regularOptions.map(opt => {
-          const optId = codeOf(opt);
-          if (!optId) return null;
-          return (
+      {isSingleOption ? (
+        /* Single non-camera option: auto-selected, show only camera if present */
+        cameraOption && cameraCode ? (
+          <div className="flex flex-wrap gap-3 pt-2 pb-3">
             <AyuSelectableOption
-              key={optId}
-              label={opt.valueCoding?.display ?? opt.valueString ?? optId}
-              value={optId}
-              selected={regularSelected.includes(optId)}
-              leftIcon={getOptionIcon(
-                opt.valueCoding?.display ?? opt.valueString ?? ''
-              )}
-              onClick={() => handleRegularOptionClick(optId)}
+              label={PE_CAMERA_TILE_LABEL}
+              value={cameraCode}
+              selected={isCameraSelected}
+              leftIcon={<img src={iconCamera} alt="" className="w-4 h-4" />}
+              onClick={handleCameraTileClick}
             />
-          );
-        })}
-        {cameraOption && cameraCode && (
-          <AyuSelectableOption
-            /* Always render the camera tile as "Take a Picture". The
-             * underlying option's display in the FHIR data can be a marker
-             * like "[picture taken]" — never expose that to the user. */
-            label={PE_CAMERA_TILE_LABEL}
-            value={cameraCode}
-            selected={isCameraSelected}
-            leftIcon={<img src={iconCamera} alt="" className="w-4 h-4" />}
-            onClick={handleCameraTileClick}
-          />
-        )}
-      </div>
+          </div>
+        ) : null
+      ) : (
+        <>
+          <p className="pt-2 text-xs text-gray-500">
+            {isMultiChoice ? SELECT_ONE_OR_MORE : SELECT_ANY_ONE}
+          </p>
+          <div className="flex flex-wrap gap-3 pt-2 pb-3">
+            {regularOptions.map(opt => {
+              const optId = codeOf(opt);
+              if (!optId) return null;
+              return (
+                <AyuSelectableOption
+                  key={optId}
+                  label={opt.valueCoding?.display ?? opt.valueString ?? optId}
+                  value={optId}
+                  selected={regularSelected.includes(optId)}
+                  disabled={isOptionDisabled(optId)}
+                  leftIcon={getOptionIcon(
+                    opt.valueCoding?.display ?? opt.valueString ?? ''
+                  )}
+                  onClick={() => handleRegularOptionClick(optId)}
+                />
+              );
+            })}
+            {cameraOption && cameraCode && (
+              <AyuSelectableOption
+                label={PE_CAMERA_TILE_LABEL}
+                value={cameraCode}
+                selected={isCameraSelected}
+                leftIcon={<img src={iconCamera} alt="" className="w-4 h-4" />}
+                onClick={handleCameraTileClick}
+              />
+            )}
+          </div>
+        </>
+      )}
       {isCameraSelected && camera && (
         <div className="pb-3">
           <PhysicalExamImageCapture
@@ -263,10 +281,6 @@ export const AyuPhysicalExamOptions = ({
             }}
             onRemove={i => camera.removeCameraImage(question.linkId, i)}
           />
-          {/* Block submission without a picture: show the error after a submit
-           * attempt (showUploadError) and also whenever the picture option is
-           * committed but has no images (e.g. all removed on edit) — that is an
-           * invalid state the user must fix before the answer can stand. */}
           {(showUploadError || cameraCommitted) &&
             cameraImages.length === 0 && (
               <p className="text-xs text-red-500 mt-1 px-3">

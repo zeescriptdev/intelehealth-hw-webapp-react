@@ -936,6 +936,50 @@ describe('buildVisitSummary', () => {
         expect(item.value).toBe('Lump – Lump details – Hard');
       }
     });
+
+    it('should replace bracket placeholder in label with the formatted value', () => {
+      /* When a non-string choice child has a label containing brackets like
+       * "Weight lost [amount]", the placeholder should be replaced with the
+       * actual answer value: "Weight lost 5 kgs". */
+      const questions: AyuQuestion[] = [
+        makeChoiceQuestion({
+          linkId: 'q1',
+          repeats: true,
+          answerOption: [
+            { valueCoding: { code: 'LOSS', display: 'Weight loss' } },
+          ],
+          item: [
+            {
+              linkId: 'q1.amount',
+              type: 'choice',
+              text: 'Lost [amount]',
+              answerOption: [
+                { valueCoding: { code: 'FIVE', display: '5 kgs' } },
+              ],
+              enableWhen: [
+                {
+                  question: 'q1',
+                  operator: '=',
+                  answerCoding: { code: 'LOSS' },
+                },
+              ],
+            },
+          ],
+        }),
+      ];
+      const answers = new Map<string, AyuAnswerValue>([
+        ['q1', ['LOSS']],
+        ['q1.amount', 'FIVE'],
+      ]);
+
+      const result = buildVisitSummary(questions, answers, 'Visit');
+      const item = result[0].items[0];
+      expect(item.type).toBe('labelValue');
+      if (item.type === 'labelValue') {
+        // Bracket placeholder [amount] replaced with resolved display "5 kgs"
+        expect(item.value).toBe('Weight loss – Lost 5 kgs');
+      }
+    });
   });
 
   describe('multi-select with nested children', () => {
@@ -3635,6 +3679,89 @@ describe('buildVisitSummary', () => {
       if (result[0].items[0].type === 'labelValue') {
         // Should contain values from nested items
         expect(result[0].items[0].value).toContain('nested 1 value');
+      }
+    });
+  });
+
+  describe('collectDescendantValues evaluateEnableWhen skip branch', () => {
+    it('should skip gated grandchildren inside collectDescendantValues', () => {
+      /* Associated symptoms path calls collectDescendantValues(nested.item)
+       * at line 373. The nested child (assoc.child) has its own children
+       * (grandchildren). One grandchild's enableWhen is met; the other's is not.
+       * The one whose enableWhen is NOT met must be skipped at line 182. */
+      const questions: AyuQuestion[] = [
+        {
+          linkId: 'assoc',
+          type: 'choice',
+          text: 'Associated symptoms',
+          repeats: true,
+          extension: [
+            { url: 'urn:intelehealth:original-question-text', valueString: 'Associated symptoms' },
+          ],
+          answerOption: [
+            { valueCoding: { code: 'ID_1', display: 'Headache' } },
+          ],
+          item: [
+            {
+              linkId: 'assoc.child',
+              type: 'choice',
+              text: 'Severity',
+              extension: [
+                { url: 'urn:intelehealth:original-question-text', valueString: 'Severity' },
+              ],
+              enableWhen: [
+                { question: 'assoc', operator: '=', answerCoding: { code: 'ID_1' } },
+              ],
+              answerOption: [
+                { valueCoding: { code: 'MILD', display: 'Mild' } },
+                { valueCoding: { code: 'SEVERE', display: 'Severe' } },
+              ],
+              item: [
+                {
+                  linkId: 'assoc.grandchild.visible',
+                  type: 'string',
+                  text: 'Visible grandchild',
+                  extension: [
+                    { url: 'urn:intelehealth:original-question-text', valueString: 'Visible grandchild' },
+                  ],
+                  enableWhen: [
+                    { question: 'assoc.child', operator: '=', answerCoding: { code: 'MILD' } },
+                  ],
+                },
+                {
+                  linkId: 'assoc.grandchild.hidden',
+                  type: 'string',
+                  text: 'Hidden grandchild',
+                  extension: [
+                    { url: 'urn:intelehealth:original-question-text', valueString: 'Hidden grandchild' },
+                  ],
+                  enableWhen: [
+                    { question: 'assoc.child', operator: '=', answerCoding: { code: 'SEVERE' } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ];
+      const answers = new Map<string, AyuAnswerValue>([
+        ['assoc', ['ID_1']],
+        ['assoc.child', 'MILD'],
+        ['assoc.grandchild.visible', 'shown detail'],
+        ['assoc.grandchild.hidden', 'stale hidden detail'],
+      ]);
+      const result = buildVisitSummary(questions, answers, 'Visit');
+      const assocSection = result.find(s => s.title === 'Associated symptoms');
+      expect(assocSection).toBeDefined();
+      const reports = assocSection!.items.find(
+        i => i.type === 'subheading' && i.heading === 'Patient reports'
+      );
+      expect(reports).toBeDefined();
+      if (reports && reports.type === 'subheading') {
+        // Visible grandchild's value should appear
+        expect(reports.values[0]).toContain('shown detail');
+        // Hidden grandchild's stale value should NOT appear (skipped by evaluateEnableWhen at line 182)
+        expect(reports.values[0]).not.toContain('stale hidden detail');
       }
     });
   });
